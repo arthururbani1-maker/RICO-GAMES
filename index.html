@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <meta name="theme-color" content="#16181d" />
+  <title>Rico Games ERP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+  <script>
+    /* Aplica o tema o quanto antes para evitar "flash" ao carregar */
+    (function () {
+      try {
+        var saved = localStorage.getItem('rg_theme');
+        var sys = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', saved || sys);
+      } catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+    })();
+  </script>
+</head>
+<body>
+  <!-- ====== LOGIN ====== -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-bg"></div>
+    <div class="login-card">
+      <div class="login-logo">
+        <div class="brand-shield">
+          <span class="crown">♛</span>
+          <span class="r">R</span>
+        </div>
+        <div class="login-title">RICO GAMES</div>
+        <div class="login-sub">Sistema de Gestão · ERP &amp; PDV</div>
+      </div>
+      <div class="login-form">
+        <label>Usuário</label>
+        <input id="login-user" type="text" value="admin" autocomplete="off" />
+        <label>Senha</label>
+        <input id="login-pass" type="password" value="1234" />
+        <button class="btn-primary btn-block" onclick="App.login()">Entrar</button>
+        <div class="login-hint">Dono: <b>admin</b> / <b>1234</b> · Funcionário: <b>funcionario</b> / <b>1234</b></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== APP SHELL ====== -->
+  <div id="app" class="app hidden">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-shield sm">
+          <span class="crown">♛</span>
+          <span class="r">R</span>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">RICO GAMES</span>
+          <span class="brand-tag">ERP &amp; PDV</span>
+        </div>
+      </div>
+      <nav class="nav" id="nav">
+        <a class="nav-item" data-route="dashboard"><span class="ico">📊</span> Dashboard</a>
+        <a class="nav-item" data-route="vendasDia"><span class="ico">🧾</span> Vendas do Dia</a>
+        <a class="nav-item" data-route="pdv"><span class="ico">🛒</span> PDV — Venda</a>
+        <a class="nav-item" data-route="caixa"><span class="ico">🪙</span> Caixa da Loja</a>
+        <a class="nav-item" data-route="estoque"><span class="ico">📦</span> Estoque</a>
+        <a class="nav-item" data-route="compras"><span class="ico">🚚</span> Compras</a>
+        <a class="nav-item" data-route="fornecedores"><span class="ico">🏭</span> Fornecedores</a>
+        <a class="nav-item" data-route="usados"><span class="ico">🔍</span> Avaliação de Usados</a>
+        <a class="nav-item" data-route="trocas"><span class="ico">🔄</span> Trocas</a>
+        <a class="nav-item" data-route="movimentacoes"><span class="ico">📜</span> Movimentações</a>
+        <a class="nav-item" data-route="garantias"><span class="ico">🛡️</span> Garantias</a>
+        <a class="nav-item" data-route="financeiro"><span class="ico">💰</span> Financeiro</a>
+        <a class="nav-item" data-route="relatorios"><span class="ico">📈</span> Relatórios</a>
+        <a class="nav-item" data-route="config"><span class="ico">⚙️</span> Configurações</a>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="sync-pill"><span class="dot"></span> <span id="sync-label">Offline · salvo localmente</span></div>
+        <a class="nav-item small" onclick="App.logout()"><span class="ico">⏻</span> Sair</a>
+      </div>
+    </aside>
+    <div class="sidebar-overlay" id="sidebar-overlay" onclick="App.toggleSidebar(false)"></div>
+
+    <!-- Main -->
+    <div class="main">
+      <header class="topbar">
+        <button class="hamburger" onclick="App.toggleSidebar(true)">☰</button>
+        <div class="topbar-title" id="page-title">Dashboard</div>
+        <div class="topbar-actions">
+          <div class="topbar-search">
+            <span>🔎</span>
+            <input id="global-search" type="text" placeholder="Buscar produto, SKU, código..." onkeydown="if(event.key==='Enter') App.globalSearch()" />
+          </div>
+          <button class="btn-ghost only-desktop" onclick="App.go('pdv')">+ Nova venda</button>
+          <button class="theme-toggle" id="theme-toggle" onclick="App.toggleTheme()" title="Alternar tema">
+            <span class="tt-ico" id="tt-ico">🌙</span><span class="only-desktop" id="tt-label">Escuro</span>
+          </button>
+          <div class="user-chip"><span class="avatar">A</span><span class="only-desktop">Admin</span></div>
+        </div>
+      </header>
+      <main class="content" id="view"></main>
+    </div>
+  </div>
+
+  <!-- ====== MODAL ====== -->
+  <div class="modal-backdrop hidden" id="modal-backdrop" onclick="if(event.target===this) Modal.close()">
+    <div class="modal" id="modal">
+      <div class="modal-head">
+        <h3 id="modal-title">Título</h3>
+        <button class="modal-x" onclick="Modal.close()">✕</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-foot" id="modal-foot"></div>
+    </div>
+  </div>
+
+  <!-- ====== TOAST ====== -->
+  <div id="toast-wrap" class="toast-wrap"></div>
+
+  <!-- Scripts -->
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/cloud.js"></script>
+  <script src="assets/js/ui.js"></script>
+  <script src="assets/js/export.js"></script>
+  <script src="assets/js/ms-select.js"></script>
+  <script src="assets/js/modules.js"></script>
+  <script src="assets/js/vendas-dia.js"></script>
+  <script src="assets/js/caixa.js"></script>
+  <script src="assets/js/config.js"></script>
+  <script src="assets/js/financeiro.js"></script>
+  <script src="assets/js/reports.js"></script>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>
