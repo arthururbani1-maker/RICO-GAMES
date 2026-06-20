@@ -2878,7 +2878,7 @@ const inStyle = 'background:var(--bg-2);border:1px solid var(--line);color:var(-
 
 Modules.cfgState = { tab: 'taxas' };
 Modules.config = function () {
-  const tabs = [['taxas', '💳 Taxas'], ['cupom', '🧾 Cupom e Garantia'], ['impressora', '🖨️ Impressora'], ['usuarios', '👤 Usuários'], ['permissoes', '🔒 Permissões'], ['nuvem', '☁️ Nuvem']];
+  const tabs = [['taxas', '💳 Taxas'], ['cupom', '🧾 Cupom e Garantia'], ['impressora', '🖨️ Impressora'], ['usuarios', '👤 Usuários'], ['permissoes', '🔒 Permissões'], ['nuvem', '☁️ Nuvem'], ['seguranca', '🛡️ Segurança']];
   setTimeout(() => Modules.cfgRenderTab(), 20);
   return `
   <div class="page-head"><div><h1>Configurações</h1><p>Ajustes do sistema</p></div></div>
@@ -2887,14 +2887,14 @@ Modules.config = function () {
 };
 Modules.cfgSetTab = function (t) {
   this.cfgState.tab = t;
-  const keys = ['taxas', 'cupom', 'impressora', 'usuarios', 'permissoes', 'nuvem'];
+  const keys = ['taxas', 'cupom', 'impressora', 'usuarios', 'permissoes', 'nuvem', 'seguranca'];
   document.querySelectorAll('#cfg-subnav .tab').forEach((el, i) => el.classList.toggle('active', keys[i] === t));
   this.cfgRenderTab();
 };
 Modules.cfgRenderTab = function () {
   const b = document.getElementById('cfg-body'); if (!b) return;
   const t = this.cfgState.tab;
-  b.innerHTML = t === 'taxas' ? this.cfgTaxasCard() : t === 'cupom' ? this.cfgCupomArea() : t === 'impressora' ? this.cfgImpressoraCard() : t === 'usuarios' ? this.cfgUsuariosCard() : t === 'permissoes' ? this.cfgPermissoesCard() : this.cfgCloudCard();
+  b.innerHTML = t === 'taxas' ? this.cfgTaxasCard() : t === 'cupom' ? this.cfgCupomArea() : t === 'impressora' ? this.cfgImpressoraCard() : t === 'usuarios' ? this.cfgUsuariosCard() : t === 'permissoes' ? this.cfgPermissoesCard() : t === 'nuvem' ? this.cfgCloudCard() : this.cfgSegurancaCard();
   if (t === 'cupom') this.cfgPreview();
 };
 Modules.cfgTaxasCard = function () {
@@ -2973,6 +2973,41 @@ Modules.cfgCloudDisconnect = function () {
 };
 Modules.cfgCloudPush = async function () { await Cloud.doPush(); Toast.ok('Dados enviados para a nuvem.'); };
 Modules.cfgCloudPull = async function () { await Cloud.initialSync(); if (App.refresh) App.refresh(); Toast.ok('Dados baixados da nuvem.'); };
+
+Modules.cfgSegurancaCard = function () {
+  if (!App.isAdmin()) return `<div class="empty-state"><div class="big">🔒</div>Apenas administradores acessam esta área.</div>`;
+  const logs = (DB.all('config')[0] || {}).resetLogs || [];
+  return `<div class="card" style="border:1px solid rgba(245,69,92,.45)">
+    <div class="section-title" style="color:var(--red)">🛡️ Reset de Dados do Sistema</div>
+    <div class="alert-card danger" style="margin-bottom:16px"><div class="a-ico">⚠️</div><div><div class="a-lbl" style="line-height:1.5">Esta ação apagará <b>todos os dados operacionais</b>: produtos, estoque, vendas, histórico, contas a pagar/receber, movimentações financeiras, caixa, compras, fornecedores, garantias, trocas, usados recebidos e relatórios.<br>A <b>estrutura</b> do ERP, temas, impressora, taxas, usuários e senhas <b>continuam intactos</b>. <b>Esta ação não pode ser desfeita.</b></div></div></div>
+    <div class="form-grid">
+      <div class="field"><label>Sua senha de administrador *</label><input id="rs-pass" type="password" autocomplete="off"></div>
+      <div class="field"><label>Digite a frase: <b>RESETAR SISTEMA</b></label><input id="rs-frase" autocomplete="off" placeholder="RESETAR SISTEMA"></div>
+    </div>
+    <label style="display:flex;align-items:center;gap:9px;margin-top:14px;font-size:13px;color:var(--txt-2)"><input type="checkbox" id="rs-ok"> Entendo que esta ação é <b>irreversível</b> e apagará todos os dados operacionais.</label>
+    <button class="btn-danger" style="margin-top:16px" onclick="Modules.cfgResetData()">🗑️ Resetar sistema (zerar dados)</button>
+    ${logs.length ? `<div style="margin-top:18px"><div style="font-size:12.5px;font-weight:700;color:var(--txt-2);margin-bottom:8px">Histórico de resets</div>${logs.slice(0, 8).map(l => `<div class="mini-stat"><span>${Fmt.datetime(l.data)}</span><span>${esc(l.usuario)}</span></div>`).join('')}</div>` : ''}
+  </div>`;
+};
+Modules.cfgResetData = function () {
+  if (!App.isAdmin()) return Toast.err('Apenas administradores podem resetar o sistema.');
+  const pass = document.getElementById('rs-pass').value;
+  const frase = fval('rs-frase');
+  const me = DB.all('usuarios').find(u => u.usuario === (App.user() && App.user().usuario));
+  if (!me || me.senha !== pass) return Toast.err('Senha de administrador incorreta.');
+  if (frase !== 'RESETAR SISTEMA') return Toast.err('Digite exatamente: RESETAR SISTEMA');
+  if (!fchk('rs-ok')) return Toast.err('Marque a confirmação de que entende que é irreversível.');
+  Modal.confirm('Tem certeza ABSOLUTA? Todos os dados operacionais serão apagados agora e não poderão ser recuperados.', () => {
+    const s = DB.state();
+    ['produtos', 'vendas', 'compras', 'fornecedores', 'avaliacoes', 'trocas', 'movimentacoes', 'garantias', 'financeiro', 'caixa', 'fechamentos', 'modelosUsados'].forEach(c => { if (Array.isArray(s[c])) s[c].length = 0; });
+    s.config[0].resetLogs = s.config[0].resetLogs || [];
+    s.config[0].resetLogs.unshift({ data: new Date().toISOString(), usuario: (App.user() && App.user().nome) || 'Admin' });
+    DB.save();
+    Modal.close();
+    Toast.ok('Sistema resetado com sucesso.');
+    App.go('dashboard');
+  }, 'Resetar agora');
+};
 
 Modules.cfgUsuariosCard = function () {
   const us = DB.all('usuarios');
