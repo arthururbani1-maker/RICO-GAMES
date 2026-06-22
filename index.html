@@ -2867,6 +2867,200 @@ Modules.cfgRegraDel = function (i) { const c = Cupom.get(); const regras = c.reg
 
 </script>
   <script>
+/* ============ RICO GAMES ERP — Importar produtos do Omie ============ */
+const Importer2 = {
+  brl(s) { s = String(s == null ? '' : s).replace(/[^0-9.,-]/g, ''); if (!s) return 0; s = s.replace(/\./g, '').replace(',', '.'); return parseFloat(s) || 0; },
+  deco(s) { const t = document.createElement('textarea'); t.innerHTML = s; return t.value; },
+  strip(s) { return this.deco(String(s).replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim(); },
+  parse(text) {
+    const out = [];
+    const trs = String(text).match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) || [];
+    trs.forEach(tr => {
+      const tds = (tr.match(/<td[^>]*>[\s\S]*?<\/td>/gi) || []).map(td => this.strip(td.replace(/^<td[^>]*>/i, '').replace(/<\/td>$/i, '')));
+      if (tds.length < 5) return;
+      const desc = tds[0];
+      if (!desc || /^descri/i.test(desc) || desc.indexOf(' - ') < 0) return;
+      const idx = desc.indexOf(' - ');
+      const code = desc.slice(0, idx).trim();
+      if (!code || /\s/.test(code) && code.length > 20) { } // code is the part before first ' - '
+      let rest = desc.slice(idx + 3).trim();
+      let unidade = '';
+      const um = rest.match(/\(([^()]{1,6})\)\s*$/);
+      if (um) { unidade = um[1]; rest = rest.slice(0, um.index).trim(); }
+      const nome = rest || code;
+      const estoque = Math.max(0, Math.round(this.brl(tds[1])));
+      const custo = this.brl(tds[2]);
+      const preco = this.brl(tds[4]);
+      const barcode = /^[0-9]{12,14}$/.test(code) ? code : '';
+      out.push({ sku: code, nome, unidade, estoque, custo, preco, barcode });
+    });
+    return out;
+  }
+};
+
+Modules.impFile = null; Modules.impItems = [];
+Modules.cfgImportarCard = function () {
+  if (!App.isAdmin()) return `<div class="empty-state"><div class="big">🔒</div>Apenas administradores podem importar.</div>`;
+  const logs = (DB.all('config')[0] || {}).importLogs || [];
+  return `<div class="card">
+    <div class="section-title">📥 Importar produtos do Omie</div>
+    <p class="muted" style="margin-bottom:14px;line-height:1.6">Exporte do Omie o relatório de produtos/posição de estoque (arquivo .html ou .xml) e importe aqui. O sistema lê o arquivo, mostra uma prévia e só cadastra/atualiza depois da sua confirmação. Não apaga nada automaticamente.</p>
+    <div id="imp-drop" ondragover="event.preventDefault();this.style.borderColor='var(--green)'" ondragleave="this.style.borderColor='var(--line)'" ondrop="Modules.impDrop(event)" style="border:2px dashed var(--line);border-radius:14px;padding:28px;text-align:center;color:var(--txt-2)">
+      <div style="font-size:34px;margin-bottom:8px">📄</div>
+      <div>Arraste o arquivo exportado do Omie aqui</div>
+      <div class="muted" style="font-size:12px;margin:6px 0 14px">ou</div>
+      <input type="file" id="imp-file" accept=".html,.htm,.xml" style="display:none" onchange="Modules.impFileSet(this.files[0])">
+      <button class="btn-ghost" onclick="document.getElementById('imp-file').click()">Selecionar arquivo do computador</button>
+      <div id="imp-fname" class="muted" style="font-size:12.5px;margin-top:10px"></div>
+    </div>
+    <div style="margin-top:14px"><button class="btn-primary" onclick="Modules.impAnalisar()">🔎 Analisar arquivo</button></div>
+    ${logs.length ? `<div style="margin-top:18px"><div style="font-size:12.5px;font-weight:700;color:var(--txt-2);margin-bottom:8px">Histórico de importações</div>${logs.slice(0, 6).map(l => `<div class="mini-stat"><span>${Fmt.datetime(l.data)} · ${esc(l.usuario)}</span><span>${l.novos} novos · ${l.atualizados} atualizados · ${l.ignorados} ignorados${l.erros ? ' · ' + l.erros + ' erros' : ''}</span></div>`).join('')}</div>` : ''}
+    <div id="imp-result" style="margin-top:18px"></div>`;
+};
+Modules.impDrop = function (e) { e.preventDefault(); const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) this.impFileSet(f); const d = document.getElementById('imp-drop'); if (d) d.style.borderColor = 'var(--line)'; };
+Modules.impFileSet = function (f) { if (!f) return; this.impFile = f; const el = document.getElementById('imp-fname'); if (el) el.textContent = 'Selecionado: ' + f.name; };
+Modules.impAnalisar = function () {
+  const f = this.impFile; if (!f) return Toast.err('Selecione ou arraste o arquivo do Omie primeiro.');
+  const r = new FileReader();
+  r.onload = () => {
+    let items;
+    try { items = Importer2.parse(r.result); } catch (e) { return Toast.err('Não consegui ler o arquivo.'); }
+    if (!items.length) return Toast.err('Nenhum produto encontrado. Confirme que é o export de produtos do Omie (.html/.xml).');
+    this.impPrepare(items); this.impRender();
+    Toast.ok(items.length + ' produtos encontrados no arquivo.');
+  };
+  r.readAsText(f);
+};
+Modules.impPrepare = function (items) {
+  const ex = DB.all('produtos');
+  const norm = s => (s || '').toString().toLowerCase().replace(/\s+/g, ' ').trim();
+  this.impItems = items.map(it => {
+    let match = null;
+    if (it.barcode) match = ex.find(p => p.barcode && p.barcode === it.barcode);
+    if (!match && it.sku) match = ex.find(p => p.sku && p.sku.toLowerCase() === it.sku.toLowerCase());
+    let status, action, matchId = null;
+    if (match) { matchId = match.id; status = norm(match.nome) === norm(it.nome) ? 'existe' : 'conflito'; action = status === 'existe' ? 'estoque' : 'nao'; }
+    else { const np = ex.find(p => norm(p.nome) === norm(it.nome)); if (np) { matchId = np.id; status = 'dup'; action = 'nao'; } else { status = 'novo'; action = 'criar'; } }
+    return Object.assign({}, it, { status, action, matchId, selected: status === 'novo' || status === 'existe' });
+  });
+};
+Modules.impRender = function () {
+  const host = document.getElementById('imp-result'); if (!host) return;
+  const cats = DB.all('categorias').map(c => c.nome);
+  host.innerHTML = `
+    <div class="toolbar">
+      <input class="grow" id="imp-q" placeholder="Buscar nome, SKU ou código de barras..." oninput="Modules.impTable()">
+      <select id="imp-filtro" onchange="Modules.impTable()"><option value="">Todos</option><option value="novo">Só novos</option><option value="existe">Já existem</option><option value="conflito">Conflitos</option><option value="dup">Possível duplicidade</option><option value="comest">Com estoque</option><option value="semest">Sem estoque</option></select>
+      <select id="imp-cat"><option value="">Categoria padrão (novos)</option>${cats.map(c => `<option ${c === 'Consoles' ? '' : ''}>${c}</option>`).join('')}</select>
+      <button class="btn-ghost" onclick="Modules.impSelAll(true)">Selecionar todos</button>
+      <button class="btn-ghost" onclick="Modules.impSelAll(false)">Desmarcar</button>
+    </div>
+    <div id="imp-summary"></div>
+    <div id="imp-table"></div>
+    <div style="margin-top:14px;display:flex;justify-content:flex-end"><button class="btn-primary" onclick="Modules.impConfirm()">✅ Confirmar importação</button></div>`;
+  this.impTable();
+};
+Modules.impStatusBadge = function (s) {
+  const m = { novo: ['b-green', 'Novo'], existe: ['b-blue', 'Já existe'], conflito: ['b-vencido', 'Conflito'], dup: ['b-amber', 'Possível duplicado'] };
+  const x = m[s] || ['b-gray', s]; return `<span class="badge ${x[0]}">${x[1]}</span>`;
+};
+Modules.impTable = function () {
+  const q = (fval('imp-q') || '').toLowerCase(), filt = fval('imp-filtro');
+  let list = this.impItems.map((it, i) => ({ it, i }));
+  if (q) list = list.filter(x => x.it.nome.toLowerCase().includes(q) || (x.it.sku || '').toLowerCase().includes(q) || (x.it.barcode || '').includes(q));
+  if (filt === 'comest') list = list.filter(x => x.it.estoque > 0);
+  else if (filt === 'semest') list = list.filter(x => x.it.estoque <= 0);
+  else if (filt) list = list.filter(x => x.it.status === filt);
+  // summary
+  const all = this.impItems;
+  const novos = all.filter(x => x.selected && x.status === 'novo').length;
+  const acaoNovo = all.filter(x => x.selected && x.action === 'novo').length;
+  const atualiza = all.filter(x => x.selected && x.matchId && x.action !== 'nao' && x.action !== 'novo').length;
+  const existe = all.filter(x => x.status === 'existe' || x.status === 'conflito' || x.status === 'dup').length;
+  const conflitos = all.filter(x => x.status === 'conflito').length;
+  document.getElementById('imp-summary').innerHTML = `<div class="grid kpis" style="margin:4px 0 12px">
+    ${kpi('Encontrados no arquivo', Fmt.num(all.length), null, '📄', '')}
+    ${kpi('Novos a cadastrar', Fmt.num(novos + acaoNovo), 'selecionados', '🟢', '')}
+    ${kpi('Serão atualizados', Fmt.num(atualiza), 'já existentes', '🔵', 'blue')}
+    ${kpi('Conflitos / revisar', Fmt.num(conflitos), 'mesmo código, dados diferentes', '⚠️', 'amber')}
+  </div>`;
+  const rows = list.map(({ it, i }) => `
+    <tr>
+      <td><input type="checkbox" ${it.selected ? 'checked' : ''} onchange="Modules.impToggle(${i},this.checked)"></td>
+      <td>${this.impStatusBadge(it.status)}</td>
+      <td class="strong">${esc(it.nome)}</td>
+      <td class="muted">${esc(it.sku)}</td>
+      <td class="muted">${esc(it.barcode || '—')}</td>
+      <td>${esc(it.unidade || '—')}</td>
+      <td class="num">${it.estoque}</td>
+      <td class="num">${Fmt.brl(it.custo)}</td>
+      <td class="num">${Fmt.brl(it.preco)}</td>
+      <td>${it.status === 'novo' ? '<span class="muted">cadastrar</span>' : `<select onchange="Modules.impSetAction(${i},this.value)" style="background:var(--bg-2);border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:5px 7px;font-size:12px">
+        <option value="nao" ${it.action === 'nao' ? 'selected' : ''}>Não importar</option>
+        <option value="estoque" ${it.action === 'estoque' ? 'selected' : ''}>Atualizar estoque</option>
+        <option value="preco" ${it.action === 'preco' ? 'selected' : ''}>Atualizar custo e preço</option>
+        <option value="tudo" ${it.action === 'tudo' ? 'selected' : ''}>Atualizar tudo</option>
+        <option value="novo" ${it.action === 'novo' ? 'selected' : ''}>Criar como novo</option></select>`}</td>
+    </tr>`).join('');
+  document.getElementById('imp-table').innerHTML = `<div class="table-wrap"><table><thead><tr><th></th><th>Status</th><th>Produto</th><th>SKU</th><th>Cód. barras</th><th>Un.</th><th class="num">Estoque</th><th class="num">Custo</th><th class="num">Preço</th><th>Ação</th></tr></thead><tbody>${rows || '<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">Nenhum item.</td></tr>'}</tbody></table></div>`;
+};
+Modules.impToggle = function (i, v) { this.impItems[i].selected = v; this.impTable(); };
+Modules.impSelAll = function (v) { const q = (fval('imp-q') || '').toLowerCase(), filt = fval('imp-filtro'); this.impItems.forEach(it => { let ok = true; if (q) ok = it.nome.toLowerCase().includes(q) || (it.sku || '').toLowerCase().includes(q) || (it.barcode || '').includes(q); if (ok && filt === 'comest') ok = it.estoque > 0; else if (ok && filt === 'semest') ok = it.estoque <= 0; else if (ok && filt) ok = it.status === filt; if (ok) it.selected = v; }); this.impTable(); };
+Modules.impSetAction = function (i, v) { this.impItems[i].action = v; if (v !== 'nao') this.impItems[i].selected = true; this.impTable(); };
+Modules.impConfirm = function () {
+  const sel = this.impItems.filter(x => x.selected && x.action !== 'nao');
+  if (!sel.length) return Toast.err('Selecione ao menos um produto para importar.');
+  const defCat = fval('imp-cat') || (DB.all('categorias')[0] || {}).nome || '';
+  Modal.confirm(`Importar agora? ${sel.length} produto(s) serão cadastrados/atualizados. Nada será apagado.`, () => {
+    let novos = 0, atualizados = 0, ignorados = 0, erros = [];
+    this.impItems.forEach(it => {
+      if (!it.selected || it.action === 'nao') { ignorados++; return; }
+      try {
+        if (!it.nome) { erros.push([it.sku || '(sem sku)', 'Sem nome — não importado']); return; }
+        const criar = it.status === 'novo' || it.action === 'novo';
+        if (criar) {
+          DB.insert('produtos', {
+            nome: it.nome, sku: it.sku || ('IMP-' + Date.now().toString(36).toUpperCase().slice(-5)), barcode: it.barcode || '',
+            categoria: defCat, marca: '—', modelo: '', condicao: 'novo', unidade: it.unidade || '',
+            qtd: Math.max(0, it.estoque || 0), min: 1, custo: it.custo || 0, custoMedio: it.custo || 0, preco: it.preco || 0,
+            serie: '', local: 'Importado Omie', status: 'disponivel', origemImport: 'omie'
+          });
+          novos++;
+        } else if (it.matchId) {
+          const p = DB.get('produtos', it.matchId); if (!p) { erros.push([it.sku, 'Produto base não encontrado']); return; }
+          const patch = {};
+          if (it.action === 'estoque') patch.qtd = Math.max(0, it.estoque || 0);
+          else if (it.action === 'preco') { patch.custo = it.custo || 0; patch.custoMedio = it.custo || 0; patch.preco = it.preco || 0; }
+          else if (it.action === 'tudo') { patch.nome = it.nome; if (it.barcode) patch.barcode = it.barcode; patch.unidade = it.unidade || p.unidade || ''; patch.qtd = Math.max(0, it.estoque || 0); patch.custo = it.custo || 0; patch.custoMedio = it.custo || 0; patch.preco = it.preco || 0; }
+          DB.update('produtos', it.matchId, patch); atualizados++;
+        }
+      } catch (e) { erros.push([it.sku || it.nome, e.message]); }
+    });
+    const cfg = DB.all('config')[0]; cfg.importLogs = cfg.importLogs || [];
+    cfg.importLogs.unshift({ data: new Date().toISOString(), usuario: (App.user() && App.user().nome) || 'Admin', total: this.impItems.length, novos, atualizados, ignorados, erros: erros.length });
+    DB.save();
+    Modal.close();
+    Modules._impErros = erros;
+    Modal.open({
+      title: '✅ Importação concluída',
+      body: `<div class="card" style="background:var(--bg-2)">
+        <div class="mini-stat"><span>Produtos no arquivo</span><b>${this.impItems.length}</b></div>
+        <div class="mini-stat"><span>Novos cadastrados</span><b style="color:var(--green)">${novos}</b></div>
+        <div class="mini-stat"><span>Atualizados</span><b style="color:#7eb0ff">${atualizados}</b></div>
+        <div class="mini-stat"><span>Ignorados</span><b>${ignorados}</b></div>
+        <div class="mini-stat"><span>Erros</span><b style="color:${erros.length ? 'var(--red)' : 'var(--txt)'}">${erros.length}</b></div></div>`,
+      foot: `${erros.length ? `<button class="btn-ghost" style="margin-right:auto" onclick="Modules.impBaixarErros()">⬇️ Baixar erros</button>` : ''}<button class="btn-primary" onclick="Modal.close();App.go('estoque')">Ver estoque</button>`
+    });
+    this.impItems = []; this.impFile = null;
+  }, 'Importar agora');
+};
+Modules.impBaixarErros = function () {
+  const aoa = [['SKU/Produto', 'Erro']].concat(Modules._impErros || []);
+  if (typeof Exporter !== 'undefined') Exporter.xlsx('erros-importacao-omie.xlsx', 'Erros', aoa);
+};
+
+</script>
+  <script>
 /* ============ RICO GAMES ERP — Configurações: Taxas e Pagamentos ============ */
 const Taxas = {
   all() { return DB.all('taxas'); },
@@ -2889,7 +3083,7 @@ const inStyle = 'background:var(--bg-2);border:1px solid var(--line);color:var(-
 
 Modules.cfgState = { tab: 'taxas' };
 Modules.config = function () {
-  const tabs = [['taxas', '💳 Taxas'], ['cupom', '🧾 Cupom e Garantia'], ['impressora', '🖨️ Impressora'], ['usuarios', '👤 Usuários'], ['permissoes', '🔒 Permissões'], ['nuvem', '☁️ Nuvem'], ['seguranca', '🛡️ Segurança']];
+  const tabs = [['taxas', '💳 Taxas'], ['cupom', '🧾 Cupom e Garantia'], ['impressora', '🖨️ Impressora'], ['importar', '📥 Importar Omie'], ['usuarios', '👤 Usuários'], ['permissoes', '🔒 Permissões'], ['nuvem', '☁️ Nuvem'], ['seguranca', '🛡️ Segurança']];
   setTimeout(() => Modules.cfgRenderTab(), 20);
   return `
   <div class="page-head"><div><h1>Configurações</h1><p>Ajustes do sistema</p></div></div>
@@ -2898,14 +3092,14 @@ Modules.config = function () {
 };
 Modules.cfgSetTab = function (t) {
   this.cfgState.tab = t;
-  const keys = ['taxas', 'cupom', 'impressora', 'usuarios', 'permissoes', 'nuvem', 'seguranca'];
+  const keys = ['taxas', 'cupom', 'impressora', 'importar', 'usuarios', 'permissoes', 'nuvem', 'seguranca'];
   document.querySelectorAll('#cfg-subnav .tab').forEach((el, i) => el.classList.toggle('active', keys[i] === t));
   this.cfgRenderTab();
 };
 Modules.cfgRenderTab = function () {
   const b = document.getElementById('cfg-body'); if (!b) return;
   const t = this.cfgState.tab;
-  b.innerHTML = t === 'taxas' ? this.cfgTaxasCard() : t === 'cupom' ? this.cfgCupomArea() : t === 'impressora' ? this.cfgImpressoraCard() : t === 'usuarios' ? this.cfgUsuariosCard() : t === 'permissoes' ? this.cfgPermissoesCard() : t === 'nuvem' ? this.cfgCloudCard() : this.cfgSegurancaCard();
+  b.innerHTML = t === 'taxas' ? this.cfgTaxasCard() : t === 'cupom' ? this.cfgCupomArea() : t === 'impressora' ? this.cfgImpressoraCard() : t === 'importar' ? this.cfgImportarCard() : t === 'usuarios' ? this.cfgUsuariosCard() : t === 'permissoes' ? this.cfgPermissoesCard() : t === 'nuvem' ? this.cfgCloudCard() : this.cfgSegurancaCard();
   if (t === 'cupom') this.cfgPreview();
 };
 Modules.cfgTaxasCard = function () {
