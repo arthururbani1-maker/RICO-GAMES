@@ -1148,7 +1148,7 @@ const Print = {
       <div class="row b" style="margin-top:2px"><span>Total de Itens:</span><span>${totItens}</span></div>
       ${hr}
       ${C.desconto && v.desconto ? `<div class="row"><span>Subtotal:</span><span>${Fmt.brl(v.bruto || v.total)}</span></div><div class="row"><span>Desconto:</span><span>- ${Fmt.brl(v.desconto)}</span></div>` : ''}
-      ${v.usadoEntrada ? `<div class="row"><span>Usado na troca:</span><span>${esc(v.usadoEntrada)}</span></div><div class="row"><span></span><span>- ${Fmt.brl(v.usadoValor || 0)}</span></div>` : ''}
+      ${(v.usados && v.usados.length) ? `<div class="b" style="margin-top:2px">USADOS NA TROCA</div>${v.usados.map(u => `<div class="row"><span>${esc(u.nome)}</span><span>- ${Fmt.brl(u.valor)}</span></div>`).join('')}<div class="row b"><span>Total usados</span><span>- ${Fmt.brl(v.usadoValor || 0)}</span></div>` : (v.usadoEntrada ? `<div class="row"><span>Usado na troca:</span><span>${esc(v.usadoEntrada)}</span></div><div class="row"><span></span><span>- ${Fmt.brl(v.usadoValor || 0)}</span></div>` : '')}
       <div class="row tot"><span>TOTAL:</span><span>${Fmt.brl(v.total)}</span></div>
       ${C.pagamento ? `${hr}<div class="sec">PAGAMENTO</div>${pagLinhas}<div class="row"><span>Valor pago:</span><span>${Fmt.brl(recebido)}</span></div>${troco > 0 ? `<div class="row"><span>Troco:</span><span>${Fmt.brl(troco)}</span></div>` : ''}` : ''}
       ${garHtml}
@@ -1572,9 +1572,9 @@ const Modules = {
   },
 
   /* ===================== PDV ===================== */
-  cart: { itens: [], desconto: 0, pagamentos: [], usado: null },
+  cart: { itens: [], desconto: 0, pagamentos: [], usados: [] },
   pdv() {
-    this.cart = { itens: [], desconto: 0, pagamentos: [], usado: null };
+    this.cart = { itens: [], desconto: 0, pagamentos: [], usados: [] };
     setTimeout(() => { const e = document.getElementById('pdv-q'); if (e) e.focus(); }, 50);
     return `
     <div class="page-head"><div><h1>Ponto de Venda</h1><p>Busque pelo nome, SKU ou bipe o código de barras</p></div>
@@ -1629,11 +1629,10 @@ const Modules = {
   },
   renderCart() {
     const c = this.cart;
+    if (!Array.isArray(c.usados)) c.usados = c.usado ? [c.usado] : [];
     const bruto = c.itens.reduce((s, i) => s + i.preco * i.qtd, 0);
-    const usadoVal = c.usado ? c.usado.valor : 0;
+    const usadoVal = c.usados.reduce((s, u) => s + (u.valor || 0), 0);
     const total = Math.max(0, bruto - c.desconto - usadoVal);
-    const custo = c.itens.reduce((s, i) => s + i.custo * i.qtd, 0);
-    const lucro = total - custo + (c.usado ? 0 : 0); // usado entra como estoque, lucro real apurado na revenda
     const qtdTotal = c.itens.reduce((s, i) => s + i.qtd, 0);
     const el = document.getElementById('cart');
     el.innerHTML = `
@@ -1647,14 +1646,14 @@ const Modules = {
             <div class="strong" style="width:74px;text-align:right">${Fmt.brl(i.preco * i.qtd)}</div>
             <span class="ci-rm" title="Remover" onclick="Modules.cartRemove('${i.produtoId}')">✕</span>
           </div>`).join('') : '<div class="cart-empty">🛒<br>Carrinho vazio.<br>Busque ou escaneie um produto.</div>'}
-        ${c.usado ? `<div class="cart-item" style="background:var(--green-soft)"><span class="ci-thumb">🔄</span><div class="ci-name">${esc(c.usado.nome)}<small>Usado na troca</small></div><div class="strong" style="color:var(--green)">− ${Fmt.brl(c.usado.valor)}</div><span class="ci-rm" onclick="Modules.removeUsado()">✕</span></div>` : ''}
+        ${c.usados.map((u, ix) => `<div class="cart-item" style="background:var(--green-soft)"><span class="ci-thumb">🔄</span><div class="ci-name">${esc(u.nome)}<small>Usado na troca${u.estado ? ' · ' + esc(u.estado) : ''}</small></div><div class="strong" style="color:var(--green)">− ${Fmt.brl(u.valor)}</div><span class="ci-rm" onclick="Modules.removeUsado(${ix})">✕</span></div>`).join('')}
       </div>
       <div class="cart-foot">
         <div class="cart-line"><span>Subtotal</span><span>${Fmt.brl(bruto)}</span></div>
         ${App.can('podeDesconto') ? `<div class="cart-line"><span>Desconto</span><span><input type="number" id="cart-desc" value="${c.desconto}" style="width:90px;text-align:right;background:var(--bg-2);border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:4px 8px" oninput="Modules.setDesc(this.value)"></span></div>` : (c.desconto ? `<div class="cart-line"><span>Desconto</span><span>− ${Fmt.brl(c.desconto)}</span></div>` : '')}
-        ${c.usado ? `<div class="cart-line"><span>Usado na troca</span><span style="color:var(--green)">− ${Fmt.brl(usadoVal)}</span></div>` : ''}
+        ${usadoVal ? `<div class="cart-line"><span>Usados na troca (${c.usados.length})</span><span style="color:var(--green)">− ${Fmt.brl(usadoVal)}</span></div>` : ''}
         <div class="cart-total"><span>Total</span><span class="val">${Fmt.brl(total)}</span></div>
-        <button class="btn-ghost btn-block" style="margin-top:10px" onclick="Modules.addUsadoTroca()">🔄 Receber usado como pagamento</button>
+        <button class="btn-ghost btn-block" style="margin-top:10px" onclick="Modules.addUsadoTroca()">🔄 Receber usado como pagamento${c.usados.length ? ' (' + c.usados.length + ')' : ''}</button>
         <button class="btn-primary btn-block" style="margin-top:8px" onclick="Modules.checkout()" ${c.itens.length ? '' : 'disabled style="opacity:.45;margin-top:8px"'}>Finalizar venda →</button>
       </div>`;
   },
@@ -1663,7 +1662,7 @@ const Modules = {
     return { 'Consoles': '🎮', 'Jogos': '💿', 'Controles': '🕹️', 'Acessórios': '🎧', 'Colecionáveis': '🏆' }[p.categoria] || '📦';
   },
   cartRemove(id) { this.cart.itens = this.cart.itens.filter(i => i.produtoId !== id); this.renderCart(); },
-  removeUsado() { this.cart.usado = null; this.renderCart(); },
+  removeUsado(ix) { this.cart.usados.splice(ix, 1); this.renderCart(); },
   precoEdit(id) {
     if (!App.can('podeAlterarPreco')) return Toast.err('Você não tem permissão para alterar preço.');
     const it = this.cart.itens.find(i => i.produtoId === id); if (!it) return;
@@ -1689,81 +1688,108 @@ const Modules = {
     Modal.close(); this.renderCart(); Toast.ok('Preço aplicado nesta venda.');
   },
   setDesc(v) { this.cart.desconto = parseFloat(v) || 0; this.renderCart(); },
-  clearCart() { this.cart = { itens: [], desconto: 0, pagamentos: [], usado: null }; this.renderCart(); },
-  utSel: null,
+  clearCart() { this.cart = { itens: [], desconto: 0, pagamentos: [], usados: [] }; this.renderCart(); },
+  utSel: null, utStep: 'list', utEditIdx: -1,
   addUsadoTroca() {
-    this.utSel = null;
+    if (!Array.isArray(this.cart.usados)) this.cart.usados = [];
+    this.utSel = null; this.utStep = 'list'; this.utEditIdx = -1;
     Modal.open({
-      title: '🔄 Receber usado como pagamento', wide: true,
+      title: '🔄 Produtos usados na negociação', wide: true,
       body: `<div id="ut-body"></div>`,
-      foot: `<button class="btn-ghost" onclick="Modal.close()">Fechar</button>`
+      foot: `<button class="btn-primary" onclick="Modal.close();Modules.renderCart()">Concluir</button>`
     });
     setTimeout(() => this.utRender(), 10);
   },
   utRender() {
     const b = document.getElementById('ut-body'); if (!b) return;
-    if (!this.utSel) {
-      const cats = DB.all('categorias').map(c => c.nome), marcas = DB.all('marcas').map(m => m.nome);
+    const c = this.cart;
+    if (this.utStep === 'list') {
+      const bruto = c.itens.reduce((s, i) => s + i.preco * i.qtd, 0);
+      const totalVenda = Math.max(0, bruto - c.desconto);
+      const soma = c.usados.reduce((s, u) => s + (u.valor || 0), 0);
+      const saldo = totalVenda - soma, troco = soma > totalVenda ? soma - totalVenda : 0;
       b.innerHTML = `
-        <p class="muted" style="margin-bottom:12px">Busque o produto no catálogo. Ao selecionar, será adicionada 1 unidade ao estoque desse produto (sem duplicar cadastro).</p>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <span class="muted">${c.usados.length} produto(s) usado(s) na troca</span>
+          <button class="btn-primary btn-sm" onclick="Modules.utGoAdd()">+ Adicionar produto usado</button>
+        </div>
+        ${c.usados.length ? `<div class="table-wrap" style="border:none"><table><thead><tr><th>Produto</th><th>Categoria</th><th>Estado</th><th>Obs.</th><th class="num">Avaliação</th><th></th></tr></thead>
+          <tbody>${c.usados.map((u, ix) => `<tr><td class="strong">${esc(u.nome)}</td><td>${esc(u.categoria || '—')}</td><td>${esc(u.estado || '—')}</td><td class="muted">${esc(u.obs || '—')}</td><td class="num strong" style="color:var(--green)">${Fmt.brl(u.valor)}</td>
+            <td class="num"><button class="btn-icon" onclick="Modules.utEdit(${ix})">✏️</button> <button class="btn-icon" onclick="Modules.utRemoveItem(${ix})">🗑️</button></td></tr>`).join('')}</tbody></table></div>`
+          : '<div class="empty-state" style="padding:22px"><div class="big">🔄</div>Nenhum usado adicionado. Clique em "Adicionar produto usado".</div>'}
+        <div class="card" style="background:var(--bg-2);margin-top:14px">
+          <div class="mini-stat"><span>Produtos usados recebidos</span><b>${c.usados.length}</b></div>
+          <div class="mini-stat"><span>Total em usados</span><b style="color:var(--green)">${Fmt.brl(soma)}</b></div>
+          <div class="mini-stat"><span>Total da venda</span><b>${Fmt.brl(totalVenda)}</b></div>
+          <div class="mini-stat" style="font-size:15px"><span class="strong">${saldo >= 0 ? 'Saldo a pagar' : 'Troco'}</span><b style="color:${saldo >= 0 ? 'var(--amber)' : 'var(--green)'}">${Fmt.brl(Math.abs(saldo))}</b></div>
+        </div>`;
+    } else if (this.utStep === 'pick') {
+      const cats = DB.all('categorias').map(x => x.nome), marcas = DB.all('marcas').map(m => m.nome);
+      b.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><span class="muted">Selecione o produto no catálogo (ou cadastre um novo).</span><button class="btn-ghost btn-sm" onclick="Modules.utBackToList()">← Voltar à lista</button></div>
         <div class="toolbar">
           <input class="grow" id="ut-q" placeholder="Buscar nome, SKU ou código..." oninput="Modules.utFilter()">
-          <select id="ut-cat" onchange="Modules.utFilter()"><option value="">Categoria</option>${cats.map(c => `<option>${c}</option>`).join('')}</select>
+          <select id="ut-cat" onchange="Modules.utFilter()"><option value="">Categoria</option>${cats.map(x => `<option>${x}</option>`).join('')}</select>
           <select id="ut-marca" onchange="Modules.utFilter()"><option value="">Marca</option>${marcas.map(m => `<option>${m}</option>`).join('')}</select>
           <select id="ut-cond" onchange="Modules.utFilter()"><option value="">Condição</option><option>novo</option><option>seminovo</option><option>usado</option></select>
         </div>
-        <div id="ut-list" style="max-height:46vh;overflow:auto;margin-bottom:12px"></div>
-        <button class="btn-ghost" onclick="Modules.utNovo()">+ Cadastrar novo produto</button>`;
+        <div id="ut-list" style="max-height:42vh;overflow:auto;margin-bottom:12px"></div>
+        <button class="btn-ghost" onclick="Modules.utNovo()">+ Cadastrar novo produto usado</button>`;
       this.utFilter();
-    } else {
-      const p = this.utSel;
+    } else if (this.utStep === 'unit') {
+      const p = this.utSel, u = this.utEditIdx >= 0 ? c.usados[this.utEditIdx] : null;
+      const sel = (v, opt) => v === opt ? 'selected' : '';
       b.innerHTML = `
         <div class="list-row" style="background:var(--green-soft);border-radius:10px;padding:12px;margin-bottom:14px">
-          <div class="lr-ico">🎮</div><div class="lr-main"><div class="lr-title">${esc(p.nome)} ${condBadge(p.condicao)}</div><div class="lr-sub">${p.sku} · ${p.categoria} · ${p.marca} · estoque atual: ${p.qtd}</div></div>
-          <button class="btn-ghost btn-sm" onclick="Modules.utBack()">Trocar produto</button>
+          <div class="lr-ico">🎮</div><div class="lr-main"><div class="lr-title">${esc(p.nome)} ${condBadge(p.condicao)}</div><div class="lr-sub">${p.sku} · ${p.categoria} · ${p.marca}</div></div>
+          ${this.utEditIdx < 0 ? `<button class="btn-ghost btn-sm" onclick="Modules.utGoAdd()">Trocar</button>` : ''}
         </div>
         <div class="form-grid">
-          <div class="field"><label>Valor aceito na troca (R$) *</label><input id="u-valor" type="number" step="0.01" placeholder="0,00"></div>
-          <div class="field"><label>Estado do produto</label><select id="u-estado"><option>Excelente</option><option selected>Bom</option><option>Regular</option><option>Com defeito</option></select></div>
-          <div class="field"><label>Número de série</label><input id="u-serie"></div>
-          <div class="field"><label>Status inicial</label><select id="u-status"><option>Disponível</option><option selected>Aguardando revisão</option><option>Manutenção</option><option>Bloqueado</option></select></div>
-          <div class="field full"><label>Acompanha</label><div style="display:flex;gap:18px;padding-top:8px;flex-wrap:wrap"><label style="font-weight:400"><input type="checkbox" id="u-controle" checked> Controle</label><label style="font-weight:400"><input type="checkbox" id="u-cabos" checked> Cabos</label><label style="font-weight:400"><input type="checkbox" id="u-caixa"> Caixa</label></div></div>
-          <div class="field full"><label>Observações</label><input id="u-obs" placeholder="Detalhes da unidade recebida"></div>
+          <div class="field"><label>Valor aceito na troca (R$) *</label><input id="u-valor" type="text" inputmode="decimal" placeholder="0,00" value="${u ? String(u.valor).replace('.', ',') : ''}"></div>
+          <div class="field"><label>Estado do produto</label><select id="u-estado"><option ${sel(u && u.estado, 'Excelente')}>Excelente</option><option ${u ? sel(u.estado, 'Bom') : 'selected'}>Bom</option><option ${sel(u && u.estado, 'Regular')}>Regular</option><option ${sel(u && u.estado, 'Com defeito')}>Com defeito</option></select></div>
+          <div class="field"><label>Número de série</label><input id="u-serie" value="${u ? esc(u.serie || '') : ''}"></div>
+          <div class="field"><label>Status inicial</label><select id="u-status"><option ${sel(u && u.statusInicial, 'Disponível')}>Disponível</option><option ${u ? sel(u.statusInicial, 'Aguardando revisão') : 'selected'}>Aguardando revisão</option><option ${sel(u && u.statusInicial, 'Manutenção')}>Manutenção</option><option ${sel(u && u.statusInicial, 'Bloqueado')}>Bloqueado</option></select></div>
+          <div class="field full"><label>Acompanha</label><div style="display:flex;gap:18px;padding-top:8px;flex-wrap:wrap"><label style="font-weight:400"><input type="checkbox" id="u-controle" ${!u || u.controle ? 'checked' : ''}> Controle</label><label style="font-weight:400"><input type="checkbox" id="u-cabos" ${!u || u.cabos ? 'checked' : ''}> Cabos</label><label style="font-weight:400"><input type="checkbox" id="u-caixa" ${u && u.caixa ? 'checked' : ''}> Caixa</label></div></div>
+          <div class="field full"><label>Observações (estado, acessórios, defeitos, garantia...)</label><input id="u-obs" value="${u ? esc(u.obs || '') : ''}" placeholder="Detalhes da unidade recebida"></div>
         </div>
-        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px"><button class="btn-ghost" onclick="Modules.utBack()">Voltar</button><button class="btn-primary" onclick="Modules.utConfirm()">Adicionar à venda</button></div>`;
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px"><button class="btn-ghost" onclick="Modules.utBackToList()">Cancelar</button><button class="btn-primary" onclick="Modules.utConfirm()">${this.utEditIdx >= 0 ? 'Salvar alterações' : 'Adicionar à lista'}</button></div>`;
+    } else if (this.utStep === 'novo') {
+      const cats = DB.all('categorias').map(x => x.nome), marcas = DB.all('marcas').map(m => m.nome);
+      b.innerHTML = `
+        <p class="muted" style="margin-bottom:12px">Cadastro rápido — fica salvo no catálogo geral e já é selecionado.</p>
+        <div class="form-grid">
+          <div class="field full"><label>Nome do produto *</label><input id="un-nome" placeholder="Ex: PS4 Slim 1TB"></div>
+          <div class="field"><label>Categoria</label><select id="un-cat">${cats.map(x => `<option ${x === 'Consoles' ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+          <div class="field"><label>Marca</label><select id="un-marca">${marcas.map(m => `<option>${m}</option>`).join('')}</select></div>
+          <div class="field"><label>Modelo</label><input id="un-modelo"></div>
+          <div class="field"><label>Condição padrão</label><select id="un-cond"><option>usado</option><option>seminovo</option><option>novo</option></select></div>
+          <div class="field"><label>Preço sugerido de venda (R$)</label><input id="un-preco" type="text" inputmode="decimal" value="0"></div>
+          <div class="field"><label>Estoque mínimo</label><input id="un-min" type="number" value="1"></div>
+          <div class="field"><label>SKU / código interno (opcional)</label><input id="un-sku" placeholder="gerado automaticamente"></div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px"><button class="btn-ghost" onclick="Modules.utGoAdd()">Voltar</button><button class="btn-primary" onclick="Modules.utNovoSave()">Cadastrar e selecionar</button></div>`;
     }
   },
+  utGoAdd() { this.utSel = null; this.utEditIdx = -1; this.utStep = 'pick'; this.utRender(); },
+  utBackToList() { this.utStep = 'list'; this.utRender(); },
   utFilter() {
     const el = document.getElementById('ut-list'); if (!el) return;
     const q = (fval('ut-q') || '').toLowerCase(), cat = fval('ut-cat'), marca = fval('ut-marca'), cond = fval('ut-cond');
+    const jaNoCart = this.cart.usados.map(u => u.produtoId);
     let list = DB.all('produtos').filter(p =>
       (!q || p.nome.toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q) || (p.barcode || '').includes(q)) &&
       (!cat || p.categoria === cat) && (!marca || p.marca === marca) && (!cond || p.condicao === cond)).slice(0, 30);
-    el.innerHTML = list.length ? list.map(p => `
-      <div class="list-row" style="cursor:pointer" onclick="Modules.utPick('${p.id}')">
-        <div class="lr-ico">🎮</div><div class="lr-main"><div class="lr-title">${esc(p.nome)} ${condBadge(p.condicao)}</div><div class="lr-sub">${p.sku} · ${p.categoria} · ${p.marca} · ${p.qtd} em estoque</div></div>
-        <span style="font-size:18px;color:var(--txt-3)">›</span></div>`).join('')
-      : '<div class="empty-state" style="padding:24px">Nenhum produto encontrado. Use "Cadastrar novo produto".</div>';
+    el.innerHTML = list.length ? list.map(p => { const dup = jaNoCart.includes(p.id); return `
+      <div class="list-row" style="${dup ? 'opacity:.5' : 'cursor:pointer'}" ${dup ? '' : `onclick="Modules.utPick('${p.id}')"`}>
+        <div class="lr-ico">🎮</div><div class="lr-main"><div class="lr-title">${esc(p.nome)} ${condBadge(p.condicao)}</div><div class="lr-sub">${p.sku} · ${p.categoria} · ${p.marca} · ${p.qtd} em estoque${dup ? ' · já adicionado' : ''}</div></div>
+        <span style="font-size:18px;color:var(--txt-3)">${dup ? '✓' : '›'}</span></div>`; }).join('')
+      : '<div class="empty-state" style="padding:24px">Nenhum produto encontrado. Use "Cadastrar novo produto usado".</div>';
   },
-  utPick(id) { this.utSel = DB.get('produtos', id); this.utRender(); },
-  utBack() { this.utSel = null; this.utRender(); },
-  utNovo() {
-    const b = document.getElementById('ut-body'); if (!b) return;
-    const cats = DB.all('categorias').map(c => c.nome), marcas = DB.all('marcas').map(m => m.nome);
-    b.innerHTML = `
-      <p class="muted" style="margin-bottom:12px">Cadastro rápido — fica salvo no catálogo geral e já é selecionado.</p>
-      <div class="form-grid">
-        <div class="field full"><label>Nome do produto *</label><input id="un-nome" placeholder="Ex: PS4 Slim 1TB"></div>
-        <div class="field"><label>Categoria</label><select id="un-cat">${cats.map(c => `<option ${c === 'Consoles' ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
-        <div class="field"><label>Marca</label><select id="un-marca">${marcas.map(m => `<option>${m}</option>`).join('')}</select></div>
-        <div class="field"><label>Modelo</label><input id="un-modelo"></div>
-        <div class="field"><label>Condição padrão</label><select id="un-cond"><option>usado</option><option>seminovo</option><option>novo</option></select></div>
-        <div class="field"><label>Preço sugerido de venda (R$)</label><input id="un-preco" type="number" step="0.01" value="0"></div>
-        <div class="field"><label>Estoque mínimo</label><input id="un-min" type="number" value="1"></div>
-        <div class="field"><label>SKU / código interno (opcional)</label><input id="un-sku" placeholder="gerado automaticamente"></div>
-      </div>
-      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px"><button class="btn-ghost" onclick="Modules.utRender()">Voltar</button><button class="btn-primary" onclick="Modules.utNovoSave()">Cadastrar e selecionar</button></div>`;
+  utPick(id) {
+    if (this.cart.usados.some(u => u.produtoId === id)) return Toast.warn('Esse produto já foi adicionado a esta venda.');
+    this.utSel = DB.get('produtos', id); this.utStep = 'unit'; this.utRender();
   },
+  utNovo() { this.utStep = 'novo'; this.utRender(); },
   utNovoSave() {
     const nome = fval('un-nome'); if (!nome) return Toast.err('Informe o nome do produto.');
     const p = DB.insert('produtos', {
@@ -1772,23 +1798,33 @@ const Modules = {
       qtd: 0, min: parseInt(fval('un-min')) || 1, custo: 0, custoMedio: 0, preco: fnum('un-preco'), serie: '', local: 'Usados', status: 'disponivel'
     });
     Toast.ok('Produto cadastrado no catálogo.');
-    this.utSel = p; this.utRender();
+    this.utSel = p; this.utStep = 'unit'; this.utRender();
   },
+  utEdit(idx) {
+    const u = this.cart.usados[idx]; if (!u) return;
+    this.utSel = DB.get('produtos', u.produtoId) || { id: u.produtoId, nome: u.nome, categoria: u.categoria, marca: u.marca, condicao: u.condicao, sku: '' };
+    this.utEditIdx = idx; this.utStep = 'unit'; this.utRender();
+  },
+  utRemoveItem(idx) { this.cart.usados.splice(idx, 1); this.utRender(); },
   utConfirm() {
-    const p = this.utSel, valor = fnum('u-valor');
-    if (!p || !valor) return Toast.err('Informe o valor aceito na troca.');
-    this.cart.usado = {
+    const p = this.utSel, valor = moneyBR(fval('u-valor'));
+    if (!p) return Toast.err('Selecione um produto.');
+    if (isNaN(valor) || valor <= 0) return Toast.err('Informe um valor de avaliação válido.');
+    const obj = {
       produtoId: p.id, nome: p.nome, categoria: p.categoria, marca: p.marca, condicao: p.condicao, valor,
       estado: fval('u-estado'), serie: fval('u-serie'), controle: fchk('u-controle'), cabos: fchk('u-cabos'), caixa: fchk('u-caixa'),
       obs: fval('u-obs'), statusInicial: fval('u-status')
     };
-    Modal.close(); this.renderCart(); Toast.ok('Usado adicionado: ' + p.nome + ' (' + Fmt.brl(valor) + ').');
+    if (this.utEditIdx >= 0) { this.cart.usados[this.utEditIdx] = obj; Toast.ok('Usado atualizado.'); }
+    else { if (this.cart.usados.some(u => u.produtoId === p.id)) return Toast.warn('Esse produto já foi adicionado.'); this.cart.usados.push(obj); Toast.ok('Usado adicionado: ' + p.nome + ' (' + Fmt.brl(valor) + ').'); }
+    this.utEditIdx = -1; this.utSel = null; this.utStep = 'list'; this.utRender();
   },
   checkout() {
     if (!this.cart.itens.length) return;
     const c = this.cart;
+    if (!Array.isArray(c.usados)) c.usados = [];
     const bruto = c.itens.reduce((s, i) => s + i.preco * i.qtd, 0);
-    const usadoVal = c.usado ? c.usado.valor : 0;
+    const usadoVal = c.usados.reduce((s, u) => s + (u.valor || 0), 0);
     const totalVenda = Math.max(0, bruto - c.desconto);
     const total = Math.max(0, totalVenda - usadoVal); // valor a pagar em dinheiro/cartão
     const custoTot = c.itens.reduce((s, i) => s + i.custo * i.qtd, 0);
@@ -1835,7 +1871,7 @@ const Modules = {
       <div class="card" style="background:var(--bg-2)">
         <div class="mini-stat" style="font-size:17px"><span class="strong">Total da venda</span><b style="color:var(--green)">${Fmt.brl(totalVenda)}</b></div>
         ${this.cart.desconto ? `<div class="mini-stat"><span>Desconto aplicado</span><b style="color:var(--red)">− ${Fmt.brl(this.cart.desconto)}</b></div>` : ''}
-        ${usadoVal ? `<div class="mini-stat"><span>🔄 Usado recebido${this.cart.usado ? ' (' + esc(this.cart.usado.nome) + ')' : ''}</span><b style="color:var(--green)">− ${Fmt.brl(usadoVal)}</b></div>` : ''}
+        ${usadoVal ? `<div class="mini-stat"><span>🔄 Usados recebidos (${(this.cart.usados || []).length})</span><b style="color:var(--green)">− ${Fmt.brl(usadoVal)}</b></div>` : ''}
         ${usadoVal ? `<div class="mini-stat"><span class="strong">A pagar</span><b>${Fmt.brl(total)}</b></div>` : ''}
         <div class="mini-stat"><span>Valor já pago</span><b>${Fmt.brl(soma)}</b></div>
         <div class="mini-stat"><span>Saldo restante</span><b style="color:${restante > 0.01 ? 'var(--amber)' : 'var(--green)'}">${Fmt.brl(Math.max(0, restante))}</b></div>
@@ -1860,15 +1896,15 @@ const Modules = {
     const operador = (typeof App !== 'undefined' && App.user() && App.user().nome) ? App.user().nome : 'Admin';
     const itensArr = c.itens.map(i => { const pr = DB.get('produtos', i.produtoId) || {}; return { produtoId: i.produtoId, sku: i.sku, nome: i.nome, qtd: i.qtd, preco: i.preco, precoOriginal: i.precoOriginal != null ? i.precoOriginal : i.preco, precoMotivo: i.precoMotivo || null, custo: i.custo, categoria: pr.categoria || '—', condicao: pr.condicao || 'novo' }; });
     const cupomSnap = (typeof Cupom !== 'undefined') ? Cupom.snapshot({ itens: itensArr }) : null;
+    const usados = (c.usados || []).slice();
     const venda = DB.insert('vendas', {
       data: new Date().toISOString(), itens: itensArr,
       bruto, desconto: c.desconto, total: totalVenda, aPagar: total, custoTotal: custoTot, lucro, taxaTotal, liquido, lucroLiquido,
-      pagamentos, recebido: soma, troco, usadoEntrada: c.usado ? c.usado.nome : null, usadoValor: usadoVal, usado: c.usado || null, usuario: operador, cupom: cupomSnap
+      pagamentos, recebido: soma, troco, usadoEntrada: usados.length ? usados.map(u => u.nome).join(', ') : null, usadoValor: usadoVal, usados: usados, usuario: operador, cupom: cupomSnap
     });
-    // Usado como pagamento → reutiliza o produto do catálogo: +1 unidade (sem duplicar) e custo médio
-    if (c.usado) {
-      const u = c.usado;
-      const stMap = { 'Disponível': 'disponivel', 'Aguardando revisão': 'manutencao', 'Manutenção': 'manutencao', 'Bloqueado': 'reservado' };
+    // Cada usado recebido → reutiliza o produto do catálogo: +1 unidade (sem duplicar) e custo médio
+    const stMap = { 'Disponível': 'disponivel', 'Aguardando revisão': 'manutencao', 'Manutenção': 'manutencao', 'Bloqueado': 'reservado' };
+    usados.forEach(u => {
       const p = DB.get('produtos', u.produtoId);
       if (p) {
         const qNova = p.qtd + 1;
@@ -1880,16 +1916,16 @@ const Modules = {
       }
       DB.logMov('usado', 'Usado recebido na troca: ' + u.nome + (u.serie ? ' (S/N ' + u.serie + ')' : '') + ' — ' + Fmt.brl(u.valor) + ' · venda #' + venda.id.slice(-4), { valor: u.valor, refId: venda.id });
       DB.logFin({ tipo: 'saida', categoria: 'Compra de usado', subcategoria: 'Troca', descricao: 'Usado recebido em troca: ' + u.nome + ' (venda #' + venda.id.slice(-4) + ')', valor: u.valor, status: 'pago', origem: 'usado', refId: venda.id });
-    }
+    });
     const formaStr = pagamentos.map(p => p.tipo + (p.parcelas > 1 ? ' ' + p.parcelas + 'x' : '')).join(' + ');
-    DB.logMov('venda', 'Venda: ' + c.itens.map(i => i.qtd + 'x ' + i.nome).join(', ') + (c.usado ? ' (troca c/ usado)' : ''), { valor: totalVenda, refId: venda.id });
-    DB.logFin({ tipo: 'entrada', categoria: 'Venda', descricao: 'Venda PDV #' + venda.id.slice(-4) + ' (' + formaStr + (c.usado ? ' + usado' : '') + ')', valor: totalVenda, taxa: taxaTotal, liquido: liquido, status: 'pago', origem: 'venda', refId: venda.id });
+    DB.logMov('venda', 'Venda: ' + c.itens.map(i => i.qtd + 'x ' + i.nome).join(', ') + (usados.length ? ' (troca c/ ' + usados.length + ' usado(s))' : ''), { valor: totalVenda, refId: venda.id });
+    DB.logFin({ tipo: 'entrada', categoria: 'Venda', descricao: 'Venda PDV #' + venda.id.slice(-4) + ' (' + formaStr + (usados.length ? ' + usados' : '') + ')', valor: totalVenda, taxa: taxaTotal, liquido: liquido, status: 'pago', origem: 'venda', refId: venda.id });
     // dinheiro líquido (descontado troco) entra no Caixa
     const dinheiro = pagamentos.filter(p => p.tipo === 'Dinheiro').reduce((s, p) => s + p.valor, 0);
     const netCash = Math.max(0, dinheiro - Math.max(0, soma - total));
     if (netCash > 0 && typeof Caixa !== 'undefined') Caixa.add({ fluxo: 'entrada', tipo: 'Venda em dinheiro', origem: 'Venda em dinheiro', categoria: 'Venda', valor: netCash, obs: c.itens.map(i => i.nome).join(', '), refId: venda.id });
     Modal.close();
-    Toast.ok('Venda concluída! ' + Fmt.brl(totalVenda) + (c.usado ? ' · usado ' + Fmt.brl(usadoVal) : '') + (troco > 0 ? ' · Troco ' + Fmt.brl(troco) : ''));
+    Toast.ok('Venda concluída! ' + Fmt.brl(totalVenda) + (usadoVal ? ' · usados ' + Fmt.brl(usadoVal) : '') + (troco > 0 ? ' · Troco ' + Fmt.brl(troco) : ''));
     this.clearCart(); this.pdvSearch();
     if (typeof Print !== 'undefined') Print.maybeAfterSale(venda);
   },
@@ -2401,7 +2437,7 @@ Modules.vdDetail = function (id) {
       <div class="card" style="background:var(--bg-2);margin-bottom:14px">
         <div class="mini-stat"><span>Data e horário</span><b>${Fmt.datetime(v.data)}</b></div>
         <div class="mini-stat"><span>Forma de pagamento</span><b>${v.pagamentos.map(p => p.tipo + (p.parcelas > 1 ? ' ' + p.parcelas + 'x' : '')).join(', ')}</b></div>
-        ${v.usadoEntrada ? `<div class="mini-stat"><span>Usado recebido na troca</span><b style="color:var(--green)">🔄 ${esc(v.usadoEntrada)}</b></div>` : ''}
+        ${(v.usados && v.usados.length) ? v.usados.map(u => `<div class="mini-stat"><span>🔄 Usado: ${esc(u.nome)}${u.estado ? ' (' + esc(u.estado) + ')' : ''}</span><b style="color:var(--green)">− ${Fmt.brl(u.valor)}</b></div>`).join('') + `<div class="mini-stat"><span class="strong">Total em usados</span><b style="color:var(--green)">− ${Fmt.brl(v.usadoValor || 0)}</b></div>` : (v.usadoEntrada ? `<div class="mini-stat"><span>Usado recebido na troca</span><b style="color:var(--green)">🔄 ${esc(v.usadoEntrada)}</b></div>` : '')}
       </div>
       <div class="table-wrap"><table><thead><tr><th>Produto</th><th class="num">Qtd</th><th class="num">Valor unit.</th><th class="num">Total</th></tr></thead><tbody>${itensHtml}</tbody></table></div>
       <div class="card" style="background:var(--bg-2);margin-top:14px">
@@ -2444,8 +2480,9 @@ Modules.vdCancel = function (id) {
     DB.update('vendas', id, { cancelada: true, canceladaEm: new Date().toISOString() });
     const fin = DB.all('financeiro').find(f => f.refId === id && f.origem === 'venda');
     if (fin) DB.remove('financeiro', fin.id);
-    // se houve usado recebido na troca: devolve a unidade somada ao produto e estorna o custo
-    if (v.usado && v.usado.produtoId) { const p = DB.get('produtos', v.usado.produtoId); if (p) DB.update('produtos', v.usado.produtoId, { qtd: Math.max(0, p.qtd - 1) }); }
+    // se houve usados recebidos na troca: devolve cada unidade somada ao produto e estorna o custo
+    const usadosV = v.usados || (v.usado ? [v.usado] : []);
+    usadosV.forEach(u => { if (u && u.produtoId) { const p = DB.get('produtos', u.produtoId); if (p) DB.update('produtos', u.produtoId, { qtd: Math.max(0, p.qtd - 1) }); } });
     DB.all('produtos').filter(p => p.vendaOrigemId === id).forEach(p => DB.remove('produtos', p.id));
     DB.all('financeiro').filter(f => f.refId === id && f.origem === 'usado').forEach(f => DB.remove('financeiro', f.id));
     // se foi paga em dinheiro, estorna o Caixa da Loja
