@@ -894,8 +894,22 @@ const Modal = {
 
 /* ---- Form value reader ---- */
 function fval(id) { const e = document.getElementById(id); return e ? e.value.trim() : ''; }
-function fnum(id) { return parseFloat(fval(id).replace(',', '.')) || 0; }
+function fnum(id) { const n = moneyBR(fval(id)); return isNaN(n) ? 0 : n; }
 function fchk(id) { const e = document.getElementById(id); return e ? e.checked : false; }
+/* Converte valor monetário em formato brasileiro/US para número.
+   "100" → 100 · "100,00" → 100 · "1.250,50" → 1250.5 · "1250.50" → 1250.5 · "1.250" → 1250 */
+function moneyBR(str) {
+  if (str == null) return NaN;
+  let s = String(str).trim().replace(/[R$\s]/gi, '');
+  if (s === '') return NaN;
+  if (s.indexOf(',') >= 0) { s = s.replace(/\./g, '').replace(',', '.'); }       // decimal = vírgula, pontos = milhar
+  else { const dots = (s.match(/\./g) || []).length;
+    if (dots > 1) s = s.replace(/\./g, '');                                        // vários pontos = milhar
+    else if (dots === 1 && (s.split('.')[1] || '').length === 3) s = s.replace('.', ''); // ex: 1.250 = milhar
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? NaN : n;
+}
 
 /* ---- Small builders ---- */
 function kpi(label, value, sub, ico, cls) {
@@ -1402,28 +1416,46 @@ const Modules = {
         <div class="field"><label>Condição</label><select id="p-cond"><option ${p.condicao === 'novo' ? 'selected' : ''}>novo</option><option ${p.condicao === 'seminovo' ? 'selected' : ''}>seminovo</option><option ${p.condicao === 'usado' ? 'selected' : ''}>usado</option></select></div>
         <div class="field"><label>Quantidade</label><input id="p-qtd" type="number" value="${p.qtd ?? 0}"></div>
         <div class="field"><label>Estoque mínimo</label><input id="p-min" type="number" value="${p.min ?? 1}"></div>
-        <div class="field"><label>Custo unitário (R$)</label><input id="p-custo" type="number" step="0.01" value="${p.custo ?? 0}"></div>
-        <div class="field"><label>Preço de venda (R$)</label><input id="p-preco" type="number" step="0.01" value="${p.preco ?? 0}"></div>
+        <div class="field"><label>Custo unitário (R$)</label><input id="p-custo" type="text" inputmode="decimal" placeholder="ex: 1.250,50" value="${p.custo != null ? String(p.custo).replace('.', ',') : ''}"></div>
+        <div class="field"><label>Preço de venda (R$)</label><input id="p-preco" type="text" inputmode="decimal" placeholder="ex: 1.999,90" value="${p.preco != null ? String(p.preco).replace('.', ',') : ''}"></div>
         <div class="field"><label>Nº de série (opcional)</label><input id="p-serie" value="${esc(p.serie || '')}"></div>
         <div class="field"><label>Localização</label><input id="p-local" value="${esc(p.local || '')}"></div>
         <div class="field"><label>Status</label><select id="p-status">
           ${['disponivel', 'reservado', 'vendido', 'manutencao', 'garantia'].map(s => `<option value="${s}" ${p.status === s ? 'selected' : ''}>${s}</option>`).join('')}
         </select></div>
-      </div>`,
+      </div>
+      ${(p.custoHist && p.custoHist.length) ? `<div style="margin-top:14px"><div style="font-size:12.5px;font-weight:700;color:var(--txt-2);margin-bottom:6px">Histórico de custo</div>${p.custoHist.slice(0, 6).map(h => `<div class="mini-stat"><span>${Fmt.datetime(h.data)} · ${esc(h.usuario || 'Admin')}</span><span>${Fmt.brl(h.de)} → <b>${Fmt.brl(h.para)}</b></span></div>`).join('')}</div>` : ''}`,
       foot: `<button class="btn-ghost" onclick="Modal.close()">Cancelar</button><button class="btn-primary" onclick="Modules.saveProduto('${id || ''}')">Salvar</button>`
     });
   },
   saveProduto(id) {
     const nome = fval('p-nome'), sku = fval('p-sku');
     if (!nome || !sku) return Toast.err('Informe nome e SKU.');
+    const custo = moneyBR(fval('p-custo'));
+    if (isNaN(custo) || custo < 0) return Toast.err('Informe um custo válido para o produto.');
+    const precoNum = moneyBR(fval('p-preco'));
+    const preco = isNaN(precoNum) ? 0 : precoNum;
     const data = {
       nome, sku, barcode: fval('p-barcode'), categoria: fval('p-cat'), marca: fval('p-marca'),
       modelo: fval('p-modelo'), condicao: fval('p-cond'), qtd: parseInt(fval('p-qtd')) || 0,
-      min: parseInt(fval('p-min')) || 0, custo: fnum('p-custo'), preco: fnum('p-preco'),
+      min: parseInt(fval('p-min')) || 0, custo, custoMedio: custo, preco,
       serie: fval('p-serie'), local: fval('p-local'), status: fval('p-status')
     };
-    if (id) { DB.update('produtos', id, data); Toast.ok('Produto atualizado.'); }
-    else { data.custoMedio = data.custo; DB.insert('produtos', data); DB.logMov('ajuste', 'Cadastro de produto: ' + nome, { valor: 0 }); Toast.ok('Produto cadastrado.'); }
+    if (id) {
+      const cur = DB.get('produtos', id) || {};
+      const custoMudou = Math.abs((cur.custo || 0) - custo) > 0.001;
+      if (custoMudou) {
+        const hist = (cur.custoHist || []).slice();
+        hist.unshift({ de: cur.custo || 0, para: custo, data: new Date().toISOString(), usuario: (typeof App !== 'undefined' && App.user() && App.user().nome) ? App.user().nome : 'Admin' });
+        data.custoHist = hist;
+        DB.logMov('ajuste', 'Custo alterado: ' + nome + ' (' + Fmt.brl(cur.custo || 0) + ' → ' + Fmt.brl(custo) + ')', { valor: 0 });
+      }
+      DB.update('produtos', id, data);
+      Toast.ok(custoMudou ? 'Custo do produto atualizado com sucesso.' : 'Produto atualizado.');
+    } else {
+      data.custoHist = []; DB.insert('produtos', data);
+      DB.logMov('ajuste', 'Cadastro de produto: ' + nome, { valor: 0 }); Toast.ok('Produto cadastrado.');
+    }
     Modal.close(); App.go('estoque');
   },
   delProduto(id) {
