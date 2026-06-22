@@ -2362,6 +2362,9 @@ Modules.vdData = function () {
   const items = [];
   vendas.forEach(v => {
     const pagStr = v.pagamentos.map(p => p.tipo + (p.parcelas > 1 ? ' ' + p.parcelas + 'x' : '')).join(', ');
+    // taxa total da venda (só sobre cartão) e base de rateio (valor de venda de cada item)
+    const taxaV = v.taxaTotal != null ? v.taxaTotal : (typeof Taxas !== 'undefined' ? Taxas.feeVenda(v) : 0);
+    const base = v.itens.reduce((s, x) => s + x.preco * x.qtd, 0);
     v.itens.forEach(i => {
       const prod = DB.get('produtos', i.produtoId);
       const categoria = i.categoria || (prod ? prod.categoria : '—');
@@ -2369,16 +2372,21 @@ Modules.vdData = function () {
       if (cat && categoria !== cat) return;
       if (tipo && condicao !== tipo) return;
       if (q && !i.nome.toLowerCase().includes(q)) return;
-      items.push({ data: v.data, nome: i.nome, categoria, condicao, qtd: i.qtd, custo: i.custo * i.qtd, precoUnit: i.preco, valor: i.preco * i.qtd, lucro: (i.preco - i.custo) * i.qtd, pag: pagStr, vendaId: v.id });
+      const valor = i.preco * i.qtd, custo = i.custo * i.qtd;
+      const taxaItem = base > 0 ? taxaV * (valor / base) : 0;
+      const semCusto = !(i.custo > 0);
+      items.push({ data: v.data, nome: i.nome, categoria, condicao, qtd: i.qtd, custo, precoUnit: i.preco, valor, lucro: valor - custo, taxaItem, lucroLiq: valor - custo - taxaItem, semCusto, pag: pagStr, vendaId: v.id });
     });
   });
   // resumo
   const fat = items.reduce((s, i) => s + i.valor, 0);
+  const custoTotal = items.reduce((s, i) => s + i.custo, 0);
+  const taxasCartao = items.reduce((s, i) => s + i.taxaItem, 0);
   const lucroB = items.reduce((s, i) => s + i.lucro, 0);
+  const lucroLiquido = items.reduce((s, i) => s + i.lucroLiq, 0);
   const qtdProd = items.reduce((s, i) => s + i.qtd, 0);
   const nVendas = new Set(items.map(i => i.vendaId)).size;
-  const despesas = DB.all('financeiro').filter(f => f.tipo === 'saida' && f.origem !== 'compra' && f.status === 'pago' && new Date(f.data) >= start && new Date(f.data) <= end).reduce((s, f) => s + f.valor, 0);
-  return { start, end, vendas, items, fat, lucroB, qtdProd, nVendas, ticket: nVendas ? fat / nVendas : 0, liquido: lucroB - despesas };
+  return { start, end, vendas, items, fat, custoTotal, taxasCartao, lucroB, lucroLiquido, qtdProd, nVendas, ticket: nVendas ? fat / nVendas : 0, liquido: lucroLiquido };
 };
 
 Modules.vdRender = function () {
@@ -2387,8 +2395,9 @@ Modules.vdRender = function () {
   const canFin = App.canFinance();
   document.getElementById('vd-kpis').innerHTML =
     kpi('Faturamento bruto', Fmt.brl(d.fat), null, '💵', '') +
-    (canFin ? kpi('Lucro bruto', Fmt.brl(d.lucroB), null, '📈', '') : '') +
-    (canFin ? kpi('Lucro líquido estimado', Fmt.brl(d.liquido), 'após despesas do período', '💎', 'purple') : '') +
+    (canFin ? kpi('Custo dos produtos', Fmt.brl(d.custoTotal), null, '🏷️', '') : '') +
+    (canFin ? kpi('Taxas de cartão', Fmt.brl(d.taxasCartao), 'descontadas do lucro', '💳', 'red') : '') +
+    (canFin ? kpi('Lucro líquido', Fmt.brl(d.lucroLiquido), 'após taxas de cartão', '💎', 'purple') : '') +
     kpi('Produtos vendidos', Fmt.num(d.qtdProd), 'unidades', '📦', 'blue') +
     kpi('Ticket médio', Fmt.brl(d.ticket), null, '🎟️', '') +
     kpi('Vendas realizadas', Fmt.num(d.nVendas), null, '🧾', 'amber');
@@ -2404,13 +2413,15 @@ Modules.vdRender = function () {
       <td class="num">${i.qtd}</td>
       ${canFin ? `<td class="num muted">${Fmt.brl(i.custo)}</td>` : ''}
       <td class="num strong">${Fmt.brl(i.valor)}</td>
-      ${canFin ? `<td class="num" style="color:var(--green)">${Fmt.brl(i.lucro)}</td>` : ''}
+      ${canFin ? `<td class="num strong" style="color:${i.lucroLiq >= 0 ? 'var(--green)' : 'var(--red)'}" title="Venda: ${Fmt.brl(i.valor)}&#10;Custo: ${Fmt.brl(i.custo)}&#10;Taxa de cartão (rateada): ${Fmt.brl(i.taxaItem)}&#10;Lucro líquido: ${Fmt.brl(i.lucroLiq)}">${Fmt.brl(i.lucroLiq)}${i.semCusto ? ' <span title="Custo não cadastrado — lucro pode estar incorreto" style="color:var(--amber)">⚠</span>' : ''}</td>` : ''}
       <td><span class="badge b-gray">${esc(i.pag)}</span></td>
       <td class="muted">#${i.vendaId.slice(-4)}</td>
     </tr>`).join('');
   document.getElementById('vd-table').innerHTML = `<div class="table-wrap"><table>
-    <thead><tr><th>Hora</th><th>Produto</th><th>Categoria</th><th>Condição</th><th class="num">Qtd</th>${canFin ? '<th class="num">Custo</th>' : ''}<th class="num">Venda</th>${canFin ? '<th class="num">Lucro</th>' : ''}<th>Pagto.</th><th>Nº</th></tr></thead>
-    <tbody>${rows || '<tr><td colspan="10" class="muted" style="text-align:center;padding:34px">Nenhuma venda no período selecionado.</td></tr>'}</tbody></table></div>`;
+    <thead><tr><th>Hora</th><th>Produto</th><th>Categoria</th><th>Condição</th><th class="num">Qtd</th>${canFin ? '<th class="num">Custo</th>' : ''}<th class="num">Venda</th>${canFin ? '<th class="num">Lucro líquido</th>' : ''}<th>Pagto.</th><th>Nº</th></tr></thead>
+    <tbody>${rows || '<tr><td colspan="10" class="muted" style="text-align:center;padding:34px">Nenhuma venda no período selecionado.</td></tr>'}</tbody>
+    ${canFin && d.items.length ? `<tfoot><tr style="font-weight:700;border-top:2px solid var(--line)"><td colspan="5">TOTAIS · ${d.qtdProd} un</td><td class="num">${Fmt.brl(d.custoTotal)}</td><td class="num">${Fmt.brl(d.fat)}</td><td class="num" style="color:${d.lucroLiquido >= 0 ? 'var(--green)' : 'var(--red)'}">${Fmt.brl(d.lucroLiquido)}</td><td colspan="2" class="muted" style="font-weight:500">Taxas: ${Fmt.brl(d.taxasCartao)}</td></tr></tfoot>` : ''}
+    </table></div>`;
 
   // ranking
   const rk = {};
@@ -2498,13 +2509,13 @@ Modules.vdExportXlsx = function () {
   const aoa = [
     ['Rico Games — Relatório de Vendas'],
     ['Período', Fmt.date(d.start) + ' a ' + Fmt.date(d.end)],
-    ['Faturamento bruto', r(d.fat)], ['Lucro bruto', r(d.lucroB)], ['Lucro líquido estimado', r(d.liquido)],
+    ['Faturamento bruto', r(d.fat)], ['Custo dos produtos', r(d.custoTotal)], ['Taxas de cartão', r(d.taxasCartao)], ['Lucro líquido', r(d.lucroLiquido)],
     ['Produtos vendidos', d.qtdProd], ['Ticket médio', r(d.ticket)], ['Vendas realizadas', d.nVendas],
     [],
-    ['Data/Hora', 'Produto', 'Categoria', 'Condição', 'Qtd', 'Custo', 'Valor Venda', 'Lucro', 'Pagamento', 'Nº Venda']
+    ['Data/Hora', 'Produto', 'Categoria', 'Condição', 'Qtd', 'Custo', 'Valor Venda', 'Taxa cartão', 'Lucro líquido', 'Pagamento', 'Nº Venda']
   ];
-  d.items.forEach(i => aoa.push([Fmt.datetime(i.data), i.nome, i.categoria, i.condicao, i.qtd, r(i.custo), r(i.valor), r(i.lucro), i.pag, '#' + i.vendaId.slice(-4)]));
-  aoa.push([]); aoa.push(['TOTAIS', '', '', '', d.qtdProd, '', r(d.fat), r(d.lucroB)]);
+  d.items.forEach(i => aoa.push([Fmt.datetime(i.data), i.nome, i.categoria, i.condicao, i.qtd, r(i.custo), r(i.valor), r(i.taxaItem), r(i.lucroLiq), i.pag, '#' + i.vendaId.slice(-4)]));
+  aoa.push([]); aoa.push(['TOTAIS', '', '', '', d.qtdProd, r(d.custoTotal), r(d.fat), r(d.taxasCartao), r(d.lucroLiquido)]);
   Exporter.xlsx('vendas-rico-games-' + new Date().toISOString().slice(0, 10) + '.xlsx', 'Vendas', aoa);
 };
 
@@ -2512,10 +2523,10 @@ Modules.vdExportPdf = function () {
   const d = this.vdData();
   const kp = (l, v) => `<div class="k"><div class="l">${l}</div><div class="v">${v}</div></div>`;
   const kpis = `<div class="kpis">
-    ${kp('Faturamento bruto', Fmt.brl(d.fat))}${kp('Lucro bruto', Fmt.brl(d.lucroB))}${kp('Lucro líquido est.', Fmt.brl(d.liquido))}
+    ${kp('Faturamento bruto', Fmt.brl(d.fat))}${kp('Taxas de cartão', Fmt.brl(d.taxasCartao))}${kp('Lucro líquido', Fmt.brl(d.lucroLiquido))}
     ${kp('Produtos vendidos', d.qtdProd)}${kp('Ticket médio', Fmt.brl(d.ticket))}${kp('Vendas', d.nVendas)}</div>`;
-  const rows = d.items.map(i => `<tr><td>${Fmt.datetime(i.data)}</td><td>${esc(i.nome)}</td><td>${esc(i.categoria)}</td><td>${i.condicao}</td><td class="num">${i.qtd}</td><td class="num">${Fmt.brl(i.valor)}</td><td class="num">${Fmt.brl(i.lucro)}</td><td>${esc(i.pag)}</td><td>#${i.vendaId.slice(-4)}</td></tr>`).join('');
-  const table = `<table><thead><tr><th>Data/Hora</th><th>Produto</th><th>Categoria</th><th>Cond.</th><th class="num">Qtd</th><th class="num">Venda</th><th class="num">Lucro</th><th>Pagto.</th><th>Nº</th></tr></thead><tbody>${rows || '<tr><td colspan="9">Sem vendas no período.</td></tr>'}</tbody></table>`;
+  const rows = d.items.map(i => `<tr><td>${Fmt.datetime(i.data)}</td><td>${esc(i.nome)}</td><td>${esc(i.categoria)}</td><td>${i.condicao}</td><td class="num">${i.qtd}</td><td class="num">${Fmt.brl(i.valor)}</td><td class="num">${Fmt.brl(i.taxaItem)}</td><td class="num">${Fmt.brl(i.lucroLiq)}</td><td>${esc(i.pag)}</td><td>#${i.vendaId.slice(-4)}</td></tr>`).join('');
+  const table = `<table><thead><tr><th>Data/Hora</th><th>Produto</th><th>Categoria</th><th>Cond.</th><th class="num">Qtd</th><th class="num">Venda</th><th class="num">Taxa</th><th class="num">Lucro líq.</th><th>Pagto.</th><th>Nº</th></tr></thead><tbody>${rows || '<tr><td colspan="10">Sem vendas no período.</td></tr>'}</tbody></table>`;
   Exporter.pdf('Vendas — ' + Fmt.date(d.start) + (Fmt.date(d.start) !== Fmt.date(d.end) ? ' a ' + Fmt.date(d.end) : ''), kpis + table);
 };
 
