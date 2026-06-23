@@ -1386,7 +1386,7 @@ const Modules = {
     const canEd = App.can('podeEditarProduto'), canFin = App.canFinance();
     const rows = list.map(p => `
       <tr>
-        <td><div class="strong">${esc(p.nome)}</div><div class="muted" style="font-size:11.5px">${p.sku}${p.serie ? ' · S/N ' + p.serie : ''}</div></td>
+        <td><div class="strong prod-link" style="cursor:pointer;color:var(--accent,#5b8cff)" onclick="ProdHist.open('${p.id}')" title="Ver histórico do produto">${esc(p.nome)} 🔎</div><div class="muted" style="font-size:11.5px">${p.sku}${p.serie ? ' · S/N ' + p.serie : ''}</div></td>
         <td>${p.categoria}<div class="muted" style="font-size:11px">${p.marca}</div></td>
         <td>${condBadge(p.condicao)}</td>
         <td class="num ${p.qtd <= p.min ? 'down strong' : ''}" style="${p.qtd <= p.min ? 'color:var(--red)' : ''}">${p.qtd}${p.qtd <= p.min ? ' ⚠️' : ''}<div class="muted" style="font-size:11px">mín ${p.min}</div></td>
@@ -1443,17 +1443,25 @@ const Modules = {
     };
     if (id) {
       const cur = DB.get('produtos', id) || {};
+      const quem = (typeof App !== 'undefined' && App.user() && App.user().nome) ? App.user().nome : 'Admin';
       const custoMudou = Math.abs((cur.custo || 0) - custo) > 0.001;
       if (custoMudou) {
         const hist = (cur.custoHist || []).slice();
-        hist.unshift({ de: cur.custo || 0, para: custo, data: new Date().toISOString(), usuario: (typeof App !== 'undefined' && App.user() && App.user().nome) ? App.user().nome : 'Admin' });
+        hist.unshift({ de: cur.custo || 0, para: custo, data: new Date().toISOString(), usuario: quem });
         data.custoHist = hist;
         DB.logMov('ajuste', 'Custo alterado: ' + nome + ' (' + Fmt.brl(cur.custo || 0) + ' → ' + Fmt.brl(custo) + ')', { valor: 0 });
+      }
+      const precoMudou = Math.abs((cur.preco || 0) - preco) > 0.001;
+      if (precoMudou) {
+        const ph = (cur.precoHist || []).slice();
+        ph.unshift({ de: cur.preco || 0, para: preco, data: new Date().toISOString(), usuario: quem });
+        data.precoHist = ph;
+        DB.logMov('ajuste', 'Preço alterado: ' + nome + ' (' + Fmt.brl(cur.preco || 0) + ' → ' + Fmt.brl(preco) + ')', { valor: 0 });
       }
       DB.update('produtos', id, data);
       Toast.ok(custoMudou ? 'Custo do produto atualizado com sucesso.' : 'Produto atualizado.');
     } else {
-      data.custoHist = []; DB.insert('produtos', data);
+      data.custoHist = []; data.precoHist = []; data.criadoEm = new Date().toISOString(); DB.insert('produtos', data);
       DB.logMov('ajuste', 'Cadastro de produto: ' + nome, { valor: 0 }); Toast.ok('Produto cadastrado.');
     }
     Modal.close(); App.go('estoque');
@@ -1475,7 +1483,9 @@ const Modules = {
   saveAjuste() {
     const id = fval('aj-prod'), q = parseInt(fval('aj-qtd')), motivo = fval('aj-motivo') || 'ajuste manual';
     const p = DB.get('produtos', id); const dif = q - p.qtd;
-    DB.update('produtos', id, { qtd: q });
+    const ents = (p.entradas || []).slice();
+    ents.unshift({ data: new Date().toISOString(), tipo: 'Ajuste de estoque', qtd: dif, custoUnit: p.custoMedio || p.custo || 0, obs: motivo, responsavel: (typeof App !== 'undefined' && App.user() && App.user().nome) ? App.user().nome : 'Admin' });
+    DB.update('produtos', id, { qtd: q, entradas: ents });
     DB.logMov('ajuste', `Ajuste de estoque: ${p.nome} (${p.qtd}→${q}, ${dif >= 0 ? '+' : ''}${dif}) · ${motivo}`, { valor: 0 });
     Toast.ok('Estoque ajustado.'); Modal.close(); App.go('estoque');
   },
@@ -1560,7 +1570,9 @@ const Modules = {
       const p = DB.get('produtos', l.produtoId); if (!p) return;
       const qtdNova = p.qtd + l.qtd;
       const custoMedio = qtdNova ? (((p.custoMedio || p.custo || 0) * p.qtd) + (l.custo * l.qtd)) / qtdNova : l.custo;
-      DB.update('produtos', l.produtoId, { qtd: qtdNova, custo: l.custo, custoMedio: Math.round(custoMedio * 100) / 100, status: 'disponivel' });
+      const ents = (p.entradas || []).slice();
+      ents.unshift({ data, tipo: 'Entrada de estoque', qtd: l.qtd, custoUnit: l.custo, fornecedor: fornNome, obs, responsavel: (typeof App !== 'undefined' && App.user() && App.user().nome) ? App.user().nome : 'Admin' });
+      DB.update('produtos', l.produtoId, { qtd: qtdNova, custo: l.custo, custoMedio: Math.round(custoMedio * 100) / 100, status: 'disponivel', entradas: ents });
       DB.logMov('compra', 'Entrada de estoque: ' + l.qtd + 'x ' + l.nome + (fornNome ? ' (' + fornNome + ')' : '') + (obs ? ' · ' + obs : ''), { valor: l.qtd * l.custo, data });
       totV += l.qtd * l.custo;
     });
@@ -2281,6 +2293,353 @@ const Modules = {
     const desc = fval('l-desc'), valor = fnum('l-valor'); if (!desc || !valor) return Toast.err('Informe descrição e valor.');
     DB.logFin({ tipo, categoria: fval('l-cat'), descricao: desc, valor, data: new Date(fval('l-data')).toISOString(), status: fval('l-status') });
     Modal.close(); Toast.ok('Lançamento salvo.'); App.go('financeiro');
+  }
+};
+
+</script>
+  <script>
+/* ============ RICO GAMES ERP — Histórico do Produto ============
+   Abre um modal completo com resumo + abas (Compras, Vendas, Linha do Tempo,
+   Evolução de custo/preço), filtros, busca e exportação Excel/PDF.
+   Informações de custo, taxas, lucro e margem aparecem só para administradores. */
+const ProdHist = {
+  curId: null,
+  tab: 'compras',
+  cache: null,
+  f: { de: '', ate: '', tipo: '', busca: '' },
+
+  canFin() { return (typeof App === 'undefined') || App.canFinance(); },
+  vendas() { return (typeof Calc !== 'undefined' && Calc.vendasValidas) ? Calc.vendasValidas() : DB.all('vendas').filter(v => !v.cancelada); },
+
+  /* ---------- coleta / agregação por produto ---------- */
+  collect(id) {
+    const p = DB.get('produtos', id);
+    if (!p) return null;
+    const fmap = {}; DB.all('fornecedores').forEach(f => fmap[f.id] = f.nome);
+    const match = (it) => it.produtoId === id || (it.sku && p.sku && it.sku === p.sku) || (it.nome && it.nome === p.nome);
+
+    /* ----- ENTRADAS ----- */
+    const entradas = [];
+    DB.all('compras').forEach(c => (c.itens || []).forEach(it => { if (match(it)) {
+      entradas.push({ data: c.data, tipo: 'Compra de fornecedor', qtd: it.qtd, custoUnit: it.custo, custoTotal: it.qtd * it.custo, fornecedor: fmap[c.fornecedorId] || '—', origem: c.nf ? ('NF ' + c.nf) : ('Compra #' + String(c.id).slice(-4)), obs: c.nf ? ('NF ' + c.nf) : '', responsavel: 'Admin', serie: '' });
+    }}));
+    this.vendas().forEach(v => (v.usados || []).forEach(u => { if (u.produtoId === id) {
+      entradas.push({ data: v.data, tipo: 'Produto usado recebido como pagamento', qtd: 1, custoUnit: u.valor, custoTotal: u.valor, fornecedor: 'Cliente', origem: 'Venda #' + String(v.id).slice(-4), obs: u.estado || '', responsavel: v.usuario || 'Admin', serie: u.serie || '' });
+    }}));
+    (p.entradas || []).forEach(e => {
+      entradas.push({ data: e.data, tipo: e.tipo || 'Entrada de estoque', qtd: e.qtd, custoUnit: e.custoUnit || 0, custoTotal: (e.custoUnit || 0) * (e.qtd || 0), fornecedor: e.fornecedor || '—', origem: e.origem || '', obs: e.obs || '', responsavel: e.responsavel || 'Admin', serie: e.serie || '' });
+    });
+    entradas.sort((a, b) => new Date(b.data) - new Date(a.data));
+
+    /* ----- SAÍDAS (vendas) ----- */
+    const saidas = [];
+    this.vendas().forEach(v => {
+      const taxaV = v.taxaTotal != null ? v.taxaTotal : (typeof Taxas !== 'undefined' ? Taxas.feeVenda(v) : 0);
+      const base = (v.itens || []).reduce((s, x) => s + x.preco * x.qtd, 0);
+      const pagStr = (v.pagamentos || []).map(pp => pp.tipo + (pp.parcelas > 1 ? ' ' + pp.parcelas + 'x' : '')).join(', ');
+      (v.itens || []).forEach(it => { if (match(it)) {
+        const valor = it.preco * it.qtd, custo = (it.custo || 0) * it.qtd;
+        const taxaItem = base > 0 ? taxaV * (valor / base) : 0;
+        const descUnit = (it.precoOriginal != null && it.precoOriginal > it.preco) ? (it.precoOriginal - it.preco) * it.qtd : 0;
+        saidas.push({ data: v.data, tipo: (v.usados && v.usados.length) ? 'Troca (venda c/ usado)' : 'Venda no PDV', qtd: it.qtd, valorUnit: it.preco, valorTotal: valor, desconto: descUnit, vendaNum: '#' + String(v.id).slice(-4), forma: pagStr, custo, lucroBruto: valor - custo, taxaItem, lucroLiq: valor - custo - taxaItem, responsavel: v.usuario || 'Admin', semCusto: !(it.custo > 0) });
+      }});
+    });
+    saidas.sort((a, b) => new Date(b.data) - new Date(a.data));
+
+    const custoHist = (p.custoHist || []).slice();
+    const precoHist = (p.precoHist || []).slice();
+    const criadoEm = p.criadoEm || (entradas.length ? entradas[entradas.length - 1].data : (custoHist.length ? custoHist[custoHist.length - 1].data : null));
+
+    /* ----- RESUMO ----- */
+    const qtdComprada = entradas.reduce((s, e) => s + (e.qtd || 0), 0);
+    const qtdVendida = saidas.reduce((s, e) => s + (e.qtd || 0), 0);
+    const receita = saidas.reduce((s, e) => s + e.valorTotal, 0);
+    const lucroTotal = saidas.reduce((s, e) => s + e.lucroLiq, 0);
+    const margem = receita > 0 ? (lucroTotal / receita * 100) : 0;
+    const ultEntrada = entradas.length ? entradas[0] : null;
+    const ultVenda = saidas.length ? saidas[0] : null;
+
+    return { p, entradas, saidas, custoHist, precoHist, criadoEm, fmap,
+      sum: { qtdComprada, qtdVendida, receita, lucroTotal, margem,
+        custoMedio: p.custoMedio || p.custo || 0,
+        ultCustoCompra: ultEntrada ? ultEntrada.custoUnit : (p.custo || 0),
+        ultEntradaData: ultEntrada ? ultEntrada.data : null,
+        ultVendaData: ultVenda ? ultVenda.data : null } };
+  },
+
+  /* ---------- abrir modal ---------- */
+  open(id) {
+    this.curId = id; this.tab = 'compras'; this.f = { de: '', ate: '', tipo: '', busca: '' };
+    this.cache = this.collect(id);
+    if (!this.cache) return Toast.err('Produto não encontrado.');
+    const p = this.cache.p;
+    Modal.open({
+      title: '🔎 Histórico — ' + esc(p.nome), wide: true,
+      body: `<div id="ph-head">${this.headHtml()}</div>
+        <div class="ph-tabs" id="ph-tabs">${this.tabsHtml()}</div>
+        <div class="ph-filters" id="ph-filters">${this.filtersHtml()}</div>
+        <div id="ph-content">${this.contentHtml()}</div>`,
+      foot: `<button class="btn-ghost" onclick="Modal.close()">Fechar</button>
+        <button class="btn-ghost" onclick="ProdHist.exportXlsx()">⬇️ Excel</button>
+        <button class="btn-primary" onclick="ProdHist.exportPdf()">🧾 PDF</button>`
+    });
+    this.injectCss();
+  },
+
+  headHtml() {
+    const s = this.cache.sum, p = this.cache.p, fin = this.canFin();
+    const cell = (l, v) => `<div class="ph-cell"><div class="ph-l">${l}</div><div class="ph-v">${v}</div></div>`;
+    let h = `<div class="ph-grid">`;
+    h += cell('Categoria', esc(p.categoria || '—'));
+    h += cell('Marca / Modelo', esc((p.marca || '—') + (p.modelo ? ' · ' + p.modelo : '')));
+    h += cell('Condição', condBadge(p.condicao));
+    h += cell('Estoque atual', `<b>${p.qtd}</b> un <span class="muted">(mín ${p.min})</span>`);
+    h += cell('Preço de venda', Fmt.brl(p.preco));
+    if (fin) h += cell('Custo médio atual', Fmt.brl(s.custoMedio));
+    if (fin) h += cell('Último custo de compra', Fmt.brl(s.ultCustoCompra));
+    h += cell('Qtd total comprada', s.qtdComprada + ' un');
+    h += cell('Qtd total vendida', s.qtdVendida + ' un');
+    h += cell('Última entrada', s.ultEntradaData ? Fmt.date(s.ultEntradaData) : '—');
+    h += cell('Última venda', s.ultVendaData ? Fmt.date(s.ultVendaData) : '—');
+    if (fin) h += cell('Lucro total gerado', `<b style="color:var(--green)">${Fmt.brl(s.lucroTotal)}</b>`);
+    if (fin) h += cell('Margem média', Fmt.pct(s.margem));
+    h += `</div>`;
+    if (p.serie) h += `<div class="muted" style="margin-top:6px;font-size:12px">Nº de série: <b>${esc(p.serie)}</b> — histórico individual desta unidade.</div>`;
+    return h;
+  },
+
+  tabsHtml() {
+    const tabs = [['compras', '📥 Compras / Entradas'], ['vendas', '📤 Vendas / Saídas'], ['timeline', '🕑 Linha do Tempo'], ['evolucao', '📈 Evolução de Custo e Preço']];
+    return tabs.map(t => `<button class="ph-tab ${this.tab === t[0] ? 'on' : ''}" onclick="ProdHist.setTab('${t[0]}')">${t[1]}</button>`).join('');
+  },
+
+  filtersHtml() {
+    if (this.tab === 'evolucao') return '';
+    let tipos = [];
+    if (this.tab === 'compras') tipos = ['Compra de fornecedor', 'Produto usado recebido como pagamento', 'Entrada de estoque', 'Ajuste de estoque'];
+    else if (this.tab === 'vendas') tipos = ['Venda no PDV', 'Troca (venda c/ usado)'];
+    else tipos = ['Cadastro', 'Entrada', 'Venda', 'Alteração de custo', 'Alteração de preço'];
+    return `<div class="ph-fbar">
+      <label>De <input type="date" id="ph-de" value="${this.f.de}" onchange="ProdHist.applyFilters()"></label>
+      <label>Até <input type="date" id="ph-ate" value="${this.f.ate}" onchange="ProdHist.applyFilters()"></label>
+      <select id="ph-tipo" onchange="ProdHist.applyFilters()"><option value="">Todos os tipos</option>${tipos.map(t => `<option ${this.f.tipo === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      <input type="text" id="ph-busca" placeholder="Buscar..." value="${esc(this.f.busca)}" oninput="ProdHist.applyFilters()" class="grow">
+    </div>`;
+  },
+
+  setTab(t) { this.tab = t; this.f.tipo = '';
+    const ft = document.getElementById('ph-filters'); if (ft) ft.innerHTML = this.filtersHtml();
+    const tb = document.getElementById('ph-tabs'); if (tb) tb.innerHTML = this.tabsHtml();
+    this.renderContent();
+  },
+  applyFilters() {
+    this.f.de = fval('ph-de'); this.f.ate = fval('ph-ate'); this.f.tipo = fval('ph-tipo'); this.f.busca = fval('ph-busca');
+    this.renderContent();
+  },
+  renderContent() { const el = document.getElementById('ph-content'); if (el) el.innerHTML = this.contentHtml(); },
+
+  filtered(rows) {
+    const de = this.f.de ? new Date(this.f.de + 'T00:00:00') : null;
+    const ate = this.f.ate ? new Date(this.f.ate + 'T23:59:59') : null;
+    const tipo = this.f.tipo, q = (this.f.busca || '').toLowerCase();
+    return rows.filter(r => {
+      const d = new Date(r.data);
+      if (de && d < de) return false;
+      if (ate && d > ate) return false;
+      if (tipo && r.tipo !== tipo) return false;
+      if (q) { const hay = [r.tipo, r.fornecedor, r.origem, r.obs, r.forma, r.vendaNum, r.responsavel, r.serie].filter(Boolean).join(' ').toLowerCase(); if (!hay.includes(q)) return false; }
+      return true;
+    });
+  },
+
+  contentHtml() {
+    if (this.tab === 'compras') return this.comprasHtml();
+    if (this.tab === 'vendas') return this.vendasHtml();
+    if (this.tab === 'timeline') return this.timelineHtml();
+    return this.evolucaoHtml();
+  },
+
+  comprasHtml() {
+    const fin = this.canFin();
+    const rows = this.filtered(this.cache.entradas);
+    if (!rows.length) return this.empty('Nenhuma entrada registrada para este produto.');
+    const body = rows.map(e => `<tr>
+      <td>${Fmt.datetime(e.data)}</td>
+      <td>${esc(e.tipo)}</td>
+      <td class="num">${e.qtd}</td>
+      ${fin ? `<td class="num">${Fmt.brl(e.custoUnit)}</td><td class="num">${Fmt.brl(e.custoTotal)}</td>` : ''}
+      <td>${esc(e.fornecedor || '—')}</td>
+      <td>${esc(e.origem || '—')}</td>
+      <td class="muted">${esc(e.obs || '') || (e.serie ? 'S/N ' + esc(e.serie) : '—')}</td>
+      <td>${esc(e.responsavel || '—')}</td></tr>`).join('');
+    const totQ = rows.reduce((s, e) => s + e.qtd, 0), totV = rows.reduce((s, e) => s + e.custoTotal, 0);
+    return `<div class="table-wrap"><table><thead><tr>
+      <th>Data/Hora</th><th>Tipo de entrada</th><th class="num">Qtd</th>${fin ? '<th class="num">Custo unit.</th><th class="num">Custo total</th>' : ''}<th>Fornecedor</th><th>Origem</th><th>Observação</th><th>Responsável</th></tr></thead>
+      <tbody>${body}</tbody>
+      <tfoot><tr><td class="strong">TOTAIS</td><td></td><td class="num strong">${totQ}</td>${fin ? `<td></td><td class="num strong">${Fmt.brl(totV)}</td>` : ''}<td colspan="4"></td></tr></tfoot></table></div>`;
+  },
+
+  vendasHtml() {
+    const fin = this.canFin();
+    const rows = this.filtered(this.cache.saidas);
+    if (!rows.length) return this.empty('Nenhuma venda registrada para este produto.');
+    const body = rows.map(e => `<tr>
+      <td>${Fmt.datetime(e.data)}</td>
+      <td>${esc(e.tipo)}</td>
+      <td class="num">${e.qtd}</td>
+      <td class="num">${Fmt.brl(e.valorUnit)}</td>
+      <td class="num">${Fmt.brl(e.valorTotal)}</td>
+      <td class="num muted">${e.desconto ? '- ' + Fmt.brl(e.desconto) : '—'}</td>
+      <td>${esc(e.vendaNum)}</td>
+      <td>${esc(e.forma || '—')}</td>
+      ${fin ? `<td class="num">${e.semCusto ? '<span title="Custo não informado">⚠️</span> ' : ''}${Fmt.brl(e.lucroBruto)}</td><td class="num">${Fmt.brl(e.taxaItem)}</td><td class="num" style="color:${e.lucroLiq >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:700">${Fmt.brl(e.lucroLiq)}</td>` : ''}
+      <td>${esc(e.responsavel || '—')}</td></tr>`).join('');
+    const totQ = rows.reduce((s, e) => s + e.qtd, 0), totVal = rows.reduce((s, e) => s + e.valorTotal, 0), totLiq = rows.reduce((s, e) => s + e.lucroLiq, 0), totTax = rows.reduce((s, e) => s + e.taxaItem, 0);
+    return `<div class="table-wrap"><table><thead><tr>
+      <th>Data/Hora</th><th>Tipo de saída</th><th class="num">Qtd</th><th class="num">Valor unit.</th><th class="num">Valor total</th><th class="num">Desconto</th><th>Nº venda</th><th>Pagamento</th>${fin ? '<th class="num">Lucro bruto</th><th class="num">Taxas</th><th class="num">Lucro líquido</th>' : ''}<th>Responsável</th></tr></thead>
+      <tbody>${body}</tbody>
+      <tfoot><tr><td class="strong">TOTAIS</td><td></td><td class="num strong">${totQ}</td><td></td><td class="num strong">${Fmt.brl(totVal)}</td><td colspan="3"></td>${fin ? `<td></td><td class="num strong">${Fmt.brl(totTax)}</td><td class="num strong" style="color:${totLiq >= 0 ? 'var(--green)' : 'var(--red)'}">${Fmt.brl(totLiq)}</td>` : ''}<td></td></tr></tfoot></table></div>`;
+  },
+
+  timelineRows() {
+    const fin = this.canFin(); const ev = [];
+    if (this.cache.criadoEm) ev.push({ data: this.cache.criadoEm, tipo: 'Cadastro', ico: '🆕', txt: 'Produto cadastrado no estoque' });
+    this.cache.entradas.forEach(e => ev.push({ data: e.data, tipo: 'Entrada', ico: '📥', txt: e.tipo + ' · ' + e.qtd + ' un' + (fin ? ' · ' + Fmt.brl(e.custoTotal) : '') + (e.fornecedor && e.fornecedor !== '—' ? ' · ' + e.fornecedor : '') + (e.serie ? ' · S/N ' + e.serie : '') }));
+    this.cache.saidas.forEach(e => ev.push({ data: e.data, tipo: 'Venda', ico: '🛒', txt: e.tipo + ' · ' + e.qtd + ' un · ' + Fmt.brl(e.valorTotal) + ' · venda ' + e.vendaNum + (fin ? ' · lucro líq. ' + Fmt.brl(e.lucroLiq) : '') }));
+    if (fin) this.cache.custoHist.forEach(h => ev.push({ data: h.data, tipo: 'Alteração de custo', ico: '⚖️', txt: 'Custo ' + Fmt.brl(h.de) + ' → ' + Fmt.brl(h.para) + ' · ' + (h.usuario || 'Admin') }));
+    this.cache.precoHist.forEach(h => ev.push({ data: h.data, tipo: 'Alteração de preço', ico: '🏷️', txt: 'Preço ' + Fmt.brl(h.de) + ' → ' + Fmt.brl(h.para) + ' · ' + (h.usuario || 'Admin') }));
+    ev.sort((a, b) => new Date(b.data) - new Date(a.data));
+    return ev;
+  },
+  timelineHtml() {
+    const rows = this.filtered(this.timelineRows());
+    if (!rows.length) return this.empty('Sem movimentações no período.');
+    return `<div class="ph-timeline">${rows.map(e => `<div class="ph-tl-item">
+      <div class="ph-tl-ico">${e.ico}</div>
+      <div class="ph-tl-body"><div class="ph-tl-top"><b>${esc(e.tipo)}</b><span class="muted">${Fmt.datetime(e.data)}</span></div>
+      <div class="ph-tl-txt">${esc(e.txt)}</div></div></div>`).join('')}</div>`;
+  },
+
+  /* ---------- séries de custo e preço ---------- */
+  series() {
+    const fin = this.canFin();
+    const custoPts = [];
+    this.cache.entradas.slice().reverse().forEach(e => { if (e.custoUnit > 0) custoPts.push({ t: e.data, val: e.custoUnit }); });
+    this.cache.custoHist.slice().reverse().forEach(h => custoPts.push({ t: h.data, val: h.para }));
+    custoPts.push({ t: new Date().toISOString(), val: this.cache.sum.custoMedio });
+    const precoPts = [];
+    if (this.cache.criadoEm) precoPts.push({ t: this.cache.criadoEm, val: this.cache.p.preco });
+    this.cache.precoHist.slice().reverse().forEach(h => precoPts.push({ t: h.data, val: h.para }));
+    precoPts.push({ t: new Date().toISOString(), val: this.cache.p.preco });
+    const dedup = a => { const m = {}; a.forEach(p => m[p.t] = p); return Object.values(m).sort((x, y) => new Date(x.t) - new Date(y.t)); };
+    const out = [{ name: 'Preço de venda', color: '#5b8cff', points: dedup(precoPts) }];
+    if (fin) out.unshift({ name: 'Custo', color: '#f59e0b', points: dedup(custoPts) });
+    return out;
+  },
+  evolucaoHtml() {
+    const series = this.series().filter(s => s.points.length);
+    const chart = this.lineChart(series);
+    let legend = `<div class="ph-legend">${series.map(s => `<span><i style="background:${s.color}"></i>${s.name}</span>`).join('')}</div>`;
+    let extra = '';
+    if (this.canFin()) {
+      const s = this.cache.sum;
+      extra = `<div class="ph-grid" style="margin-top:14px">
+        <div class="ph-cell"><div class="ph-l">Custo médio atual</div><div class="ph-v">${Fmt.brl(s.custoMedio)}</div></div>
+        <div class="ph-cell"><div class="ph-l">Preço atual</div><div class="ph-v">${Fmt.brl(this.cache.p.preco)}</div></div>
+        <div class="ph-cell"><div class="ph-l">Margem atual</div><div class="ph-v">${Fmt.pct(this.cache.p.preco ? (this.cache.p.preco - s.custoMedio) / this.cache.p.preco * 100 : 0)}</div></div>
+        <div class="ph-cell"><div class="ph-l">Margem média realizada</div><div class="ph-v">${Fmt.pct(s.margem)}</div></div></div>`;
+    }
+    return `${legend}<div class="ph-chart">${chart}</div>${extra}`;
+  },
+  lineChart(series) {
+    const all = [].concat(...series.map(s => s.points));
+    if (all.length < 2) return this.empty('Sem dados suficientes para gerar o gráfico (são necessárias ao menos 2 movimentações).');
+    const ts = all.map(p => +new Date(p.t)), vs = all.map(p => p.val);
+    let tmin = Math.min(...ts), tmax = Math.max(...ts); if (tmin === tmax) { tmin -= 864e5; tmax += 864e5; }
+    let vmin = 0, vmax = Math.max(...vs); if (vmax === vmin) vmax = vmin + 1; vmax *= 1.12;
+    const W = 640, H = 250, pl = 56, pr = 14, pt = 14, pb = 30;
+    const x = t => pl + ((+new Date(t)) - tmin) / (tmax - tmin) * (W - pl - pr);
+    const y = v => pt + (1 - (v - vmin) / (vmax - vmin)) * (H - pt - pb);
+    let g = '';
+    for (let i = 0; i <= 4; i++) { const v = vmin + (vmax - vmin) * i / 4, yy = y(v); g += `<line x1="${pl}" y1="${yy}" x2="${W - pr}" y2="${yy}" stroke="var(--line,#2a2f3a)" stroke-width="1"/><text x="${pl - 6}" y="${yy + 3}" text-anchor="end" font-size="10" fill="var(--txt-2,#9aa3b2)">${Fmt.brl(v).replace('R$ ', '')}</text>`; }
+    const tdiv = 4;
+    for (let i = 0; i <= tdiv; i++) { const t = tmin + (tmax - tmin) * i / tdiv, xx = x(new Date(t)); g += `<text x="${xx}" y="${H - 10}" text-anchor="middle" font-size="10" fill="var(--txt-2,#9aa3b2)">${new Date(t).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</text>`; }
+    let paths = '';
+    series.forEach(s => {
+      if (!s.points.length) return;
+      const d = s.points.map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ' ' + y(p.val).toFixed(1)).join(' ');
+      paths += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.5"/>`;
+      paths += s.points.map(p => `<circle cx="${x(p.t).toFixed(1)}" cy="${y(p.val).toFixed(1)}" r="3.5" fill="${s.color}"><title>${new Date(p.t).toLocaleDateString('pt-BR')} · ${Fmt.brl(p.val)}</title></circle>`).join('');
+    });
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">${g}${paths}</svg>`;
+  },
+
+  empty(msg) { return `<div class="muted" style="text-align:center;padding:34px">${esc(msg)}</div>`; },
+
+  /* ---------- exportação ---------- */
+  exportData() {
+    const fin = this.canFin();
+    if (this.tab === 'vendas') {
+      const head = ['Data', 'Tipo', 'Qtd', 'Valor unit.', 'Valor total', 'Desconto', 'Nº venda', 'Pagamento'].concat(fin ? ['Lucro bruto', 'Taxas', 'Lucro líquido'] : []).concat(['Responsável']);
+      const aoa = [head];
+      this.filtered(this.cache.saidas).forEach(e => aoa.push([Fmt.datetime(e.data), e.tipo, e.qtd, e.valorUnit, e.valorTotal, e.desconto, e.vendaNum, e.forma].concat(fin ? [e.lucroBruto, e.taxaItem, e.lucroLiq] : []).concat([e.responsavel])));
+      return { aoa, name: 'Vendas' };
+    }
+    if (this.tab === 'timeline') {
+      const aoa = [['Data', 'Tipo', 'Descrição']];
+      this.filtered(this.timelineRows()).forEach(e => aoa.push([Fmt.datetime(e.data), e.tipo, e.txt]));
+      return { aoa, name: 'Linha do Tempo' };
+    }
+    // compras (default)
+    const head = ['Data', 'Tipo', 'Qtd'].concat(fin ? ['Custo unit.', 'Custo total'] : []).concat(['Fornecedor', 'Origem', 'Observação', 'Responsável']);
+    const aoa = [head];
+    this.filtered(this.cache.entradas).forEach(e => aoa.push([Fmt.datetime(e.data), e.tipo, e.qtd].concat(fin ? [e.custoUnit, e.custoTotal] : []).concat([e.fornecedor, e.origem, e.obs, e.responsavel])));
+    return { aoa, name: 'Compras' };
+  },
+  exportXlsx() {
+    const d = this.exportData();
+    const slug = (this.cache.p.nome || 'produto').replace(/[^\w]+/g, '-').slice(0, 30);
+    Exporter.xlsx('historico-' + slug + '-' + d.name.toLowerCase() + '.xlsx', d.name, d.aoa);
+  },
+  exportPdf() {
+    const d = this.exportData(), p = this.cache.p, s = this.cache.sum, fin = this.canFin();
+    const th = d.aoa[0].map(h => `<th>${esc(h)}</th>`).join('');
+    const body = d.aoa.slice(1).map(r => `<tr>${r.map((c, i) => `<td class="${typeof c === 'number' ? 'num' : ''}">${typeof c === 'number' && i > 0 ? (d.aoa[0][i].match(/Custo|Valor|Lucro|Taxa|Desconto/) ? Fmt.brl(c) : c) : esc(c)}</td>`).join('')}</tr>`).join('');
+    const kpis = `<div class="kpis">
+      <div class="k"><div class="l">Estoque atual</div><div class="v">${p.qtd} un</div></div>
+      <div class="k"><div class="l">Qtd comprada</div><div class="v">${s.qtdComprada}</div></div>
+      <div class="k"><div class="l">Qtd vendida</div><div class="v">${s.qtdVendida}</div></div>
+      ${fin ? `<div class="k"><div class="l">Lucro total</div><div class="v">${Fmt.brl(s.lucroTotal)}</div></div><div class="k"><div class="l">Margem média</div><div class="v">${Fmt.pct(s.margem)}</div></div>` : ''}</div>`;
+    Exporter.pdf('Histórico do Produto — ' + p.nome + ' (' + d.name + ')', `<h1 style="font-size:15px;margin:0 0 10px">${esc(p.nome)} · ${esc(p.sku)}</h1>${kpis}<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>`);
+  },
+
+  /* ---------- estilos (injetados uma vez) ---------- */
+  injectCss() {
+    if (document.getElementById('ph-css')) return;
+    const css = `
+    .ph-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+    .ph-cell{background:var(--bg-2,#1c1f27);border:1px solid var(--line,#2a2f3a);border-radius:9px;padding:8px 10px}
+    .ph-l{font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--txt-2,#9aa3b2)}
+    .ph-v{font-size:14px;font-weight:600;margin-top:2px}
+    .ph-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 10px;border-bottom:1px solid var(--line,#2a2f3a);padding-bottom:8px}
+    .ph-tab{background:transparent;border:1px solid var(--line,#2a2f3a);color:var(--txt-2,#9aa3b2);padding:7px 12px;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600}
+    .ph-tab.on{background:var(--accent,#5b8cff);border-color:var(--accent,#5b8cff);color:#fff}
+    .ph-fbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+    .ph-fbar label{font-size:11.5px;color:var(--txt-2,#9aa3b2);display:flex;flex-direction:column;gap:2px}
+    .ph-fbar input,.ph-fbar select{padding:6px 8px;border-radius:7px;border:1px solid var(--line,#2a2f3a);background:var(--bg-2,#1c1f27);color:var(--txt,#e7eaf0);font-size:12.5px}
+    .ph-fbar .grow{flex:1;min-width:140px;align-self:flex-end}
+    .ph-timeline{display:flex;flex-direction:column;gap:0;position:relative}
+    .ph-tl-item{display:flex;gap:12px;padding:9px 0;border-left:2px solid var(--line,#2a2f3a);margin-left:14px;padding-left:16px;position:relative}
+    .ph-tl-ico{position:absolute;left:-15px;top:8px;width:26px;height:26px;border-radius:50%;background:var(--bg-2,#1c1f27);border:1px solid var(--line,#2a2f3a);display:flex;align-items:center;justify-content:center;font-size:13px}
+    .ph-tl-body{flex:1;margin-left:8px}
+    .ph-tl-top{display:flex;justify-content:space-between;gap:8px;font-size:12.5px}
+    .ph-tl-txt{font-size:12.5px;color:var(--txt-2,#9aa3b2);margin-top:2px}
+    .ph-legend{display:flex;gap:16px;margin-bottom:8px;font-size:12px}
+    .ph-legend span{display:flex;align-items:center;gap:6px}
+    .ph-legend i{width:14px;height:4px;border-radius:2px;display:inline-block}
+    .ph-chart{background:var(--bg-2,#1c1f27);border:1px solid var(--line,#2a2f3a);border-radius:10px;padding:10px}
+    `;
+    const st = document.createElement('style'); st.id = 'ph-css'; st.textContent = css; document.head.appendChild(st);
   }
 };
 
