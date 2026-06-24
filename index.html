@@ -1976,83 +1976,107 @@ const Modules = {
   /* ===================== COMPRAS ===================== */
   compras() {
     const cs = DB.all('compras').slice().sort((a, b) => new Date(b.data) - new Date(a.data));
-    const fmap = {}; DB.all('fornecedores').forEach(f => fmap[f.id] = f.nome);
-    return `<div class="page-head"><div><h1>Compras</h1><p>Entrada de mercadorias e histórico de compras</p></div>
-      <div class="actions"><button class="btn-primary" onclick="Modules.compraForm()">+ Entrada de mercadoria</button></div></div>
-      <div class="table-wrap"><table><thead><tr><th>Data</th><th>NF</th><th>Fornecedor</th><th>Itens</th><th class="num">Frete</th><th class="num">Impostos</th><th class="num">Total</th><th>Status</th></tr></thead>
-      <tbody>${cs.map(c => `<tr><td>${Fmt.date(c.data)}</td><td>${esc(c.nf || '-')}</td><td>${esc(fmap[c.fornecedorId] || '-')}</td>
-        <td>${c.itens.reduce((s, i) => s + i.qtd, 0)} un · ${c.itens.length} itens</td><td class="num">${Fmt.brl(c.frete)}</td><td class="num">${Fmt.brl(c.impostos)}</td>
-        <td class="num strong">${Fmt.brl(c.total)}</td><td>${statusBadge(c.status)}</td></tr>`).join('') || '<tr><td colspan="8" class="muted" style="text-align:center;padding:30px">Nenhuma compra.</td></tr>'}</tbody></table></div>`;
+    const condB = c => condBadge(c || 'novo');
+    const rows = [];
+    cs.forEach(c => (c.itens || []).forEach(i => rows.push({
+      data: c.data, nome: i.nome, qtd: i.qtd, custo: i.custo, condicao: i.condicao || 'novo',
+      obs: c.obs || '', resp: c.responsavel || 'Admin', novo: !i.produtoId
+    })));
+    return `<div class="page-head"><div><h1>Compras</h1><p>Lançe compras rápido: foco no produto, custo e quantidade</p></div>
+      <div class="actions"><button class="btn-primary" onclick="Modules.compraForm()">+ Nova compra</button></div></div>
+      <div class="table-wrap"><table><thead><tr><th>Data</th><th>Produto</th><th class="num">Qtd</th><th class="num">Custo unit.</th><th class="num">Custo total</th><th>Condição</th><th>Observação</th><th>Responsável</th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td>${Fmt.date(r.data)}</td>
+        <td class="strong">${esc(r.nome)} ${r.novo ? '<span class="badge b-blue">novo</span>' : ''}</td>
+        <td class="num">${r.qtd}</td>
+        <td class="num">${Fmt.brl(r.custo)}</td>
+        <td class="num strong">${Fmt.brl(r.qtd * r.custo)}</td>
+        <td>${condB(r.condicao)}</td>
+        <td class="muted">${esc(r.obs) || '—'}</td>
+        <td>${esc(r.resp)}</td></tr>`).join('') || '<tr><td colspan="8" class="muted" style="text-align:center;padding:30px">Nenhuma compra lançada ainda.</td></tr>'}</tbody></table></div>`;
   },
   compraItens: [],
   compraForm() {
     this.compraItens = [];
     const fs = DB.all('fornecedores');
+    const resp = (typeof App !== 'undefined' && App.user() && App.user().nome) ? App.user().nome : 'Admin';
     Modal.open({
-      title: '🚚 Entrada de mercadoria', wide: true,
-      body: `<div class="form-grid">
-        <div class="field"><label>Fornecedor</label><select id="c-forn">${fs.map(f => `<option value="${f.id}">${esc(f.nome)}</option>`).join('')}</select></div>
-        <div class="field"><label>Nota Fiscal</label><input id="c-nf" placeholder="NF-0000"></div>
-        <div class="field"><label>Frete (R$)</label><input id="c-frete" type="number" step="0.01" value="0" oninput="Modules.renderCompraResumo()"></div>
-        <div class="field"><label>Impostos (R$)</label><input id="c-imp" type="number" step="0.01" value="0" oninput="Modules.renderCompraResumo()"></div>
-      </div>
-      <div class="section-title" style="margin-top:18px">Itens da compra</div>
+      title: '🛒 Nova compra', wide: true,
+      body: `<div class="section-title" style="margin-top:0">Produto comprado</div>
       <div class="form-grid">
-        <div class="field full"><label>Produto (existente ou novo nome)</label><input id="ci-prod" list="ci-prodlist" placeholder="Buscar ou digitar novo produto">
+        <div class="field full"><label>Produto (busque um existente ou digite um novo)</label><input id="ci-prod" list="ci-prodlist" placeholder="Ex: Controle DualSense Branco" onchange="Modules.compraPickProduct()">
           <datalist id="ci-prodlist">${DB.all('produtos').map(p => `<option value="${esc(p.nome)}">${p.sku}</option>`).join('')}</datalist></div>
-        <div class="field"><label>Quantidade</label><input id="ci-qtd" type="number" value="1"></div>
-        <div class="field"><label>Custo unitário (R$)</label><input id="ci-custo" type="number" step="0.01" value="0"></div>
+        <div class="field"><label>Quantidade</label><input id="ci-qtd" type="number" min="1" value="1"></div>
+        <div class="field"><label>Custo unitário (R$)</label><input id="ci-custo" type="text" inputmode="decimal" placeholder="ex: 280,00"></div>
+        <div class="field"><label>Condição</label><select id="ci-cond"><option value="novo">novo</option><option value="seminovo">seminovo</option><option value="usado">usado</option></select></div>
       </div>
-      <button class="btn-ghost btn-sm" style="margin-top:8px" onclick="Modules.addCompraItem()">+ Adicionar item</button>
+      <button class="btn-primary btn-sm" style="margin-top:10px" onclick="Modules.addCompraItem()">+ Adicionar à compra</button>
       <div id="compra-itens" style="margin-top:14px"></div>
+      <details style="margin-top:14px"><summary style="cursor:pointer;color:var(--txt-2);font-size:13px">Opcional — fornecedor e observação</summary>
+        <div class="form-grid" style="margin-top:10px">
+          <div class="field"><label>Fornecedor (opcional)</label><select id="c-forn"><option value="">— sem fornecedor —</option>${fs.map(f => `<option value="${f.id}">${esc(f.nome)}</option>`).join('')}</select></div>
+          <div class="field full"><label>Observação (opcional)</label><input id="c-obs" placeholder="Ex: lote promocional, compra balcão..."></div>
+        </div></details>
+      <div class="muted" style="margin-top:10px;font-size:12px">Responsável pelo lançamento: <b>${esc(resp)}</b></div>
       <div id="compra-resumo"></div>`,
-      foot: `<button class="btn-ghost" onclick="Modal.close()">Cancelar</button><button class="btn-primary" onclick="Modules.saveCompra()">Confirmar entrada</button>`
+      foot: `<button class="btn-ghost" onclick="Modal.close()">Cancelar</button><button class="btn-primary" onclick="Modules.saveCompra()">✅ Salvar compra</button>`
     });
     this.renderCompraResumo();
   },
+  compraPickProduct() {
+    const nome = fval('ci-prod');
+    const p = DB.all('produtos').find(x => x.nome.toLowerCase() === nome.toLowerCase());
+    if (p) {
+      const cc = document.getElementById('ci-cond'); if (cc && p.condicao) cc.value = p.condicao;
+      const ce = document.getElementById('ci-custo'); if (ce && !ce.value && (p.custo || p.custoMedio)) ce.value = String(p.custo || p.custoMedio).replace('.', ',');
+    }
+  },
   addCompraItem() {
-    const nome = fval('ci-prod'), qtd = parseInt(fval('ci-qtd')) || 0, custo = fnum('ci-custo');
-    if (!nome || qtd <= 0) return Toast.err('Informe produto e quantidade.');
+    const nome = fval('ci-prod'), qtd = parseInt(fval('ci-qtd')) || 0, custo = moneyBR(fval('ci-custo'));
+    if (!nome) return Toast.err('Informe o produto comprado.');
+    if (qtd <= 0) return Toast.err('Quantidade deve ser maior que zero.');
+    if (isNaN(custo) || custo < 0) return Toast.err('Informe um custo unitário válido.');
     const existente = DB.all('produtos').find(p => p.nome.toLowerCase() === nome.toLowerCase());
-    this.compraItens.push({ nome, qtd, custo, sku: existente ? existente.sku : null, produtoId: existente ? existente.id : null });
-    document.getElementById('ci-prod').value = ''; document.getElementById('ci-qtd').value = '1'; document.getElementById('ci-custo').value = '0';
+    this.compraItens.push({ nome, qtd, custo, condicao: fval('ci-cond') || 'novo', sku: existente ? existente.sku : null, produtoId: existente ? existente.id : null });
+    document.getElementById('ci-prod').value = ''; document.getElementById('ci-qtd').value = '1'; document.getElementById('ci-custo').value = '';
+    document.getElementById('ci-prod').focus();
     this.renderCompraResumo();
   },
   renderCompraResumo() {
     const box = document.getElementById('compra-itens'); if (!box) return;
-    box.innerHTML = this.compraItens.length ? `<div class="table-wrap"><table><thead><tr><th>Produto</th><th class="num">Qtd</th><th class="num">Custo un.</th><th class="num">Subtotal</th><th></th></tr></thead>
-      <tbody>${this.compraItens.map((i, idx) => `<tr><td>${esc(i.nome)} ${i.produtoId ? '' : '<span class="badge b-blue">novo</span>'}</td><td class="num">${i.qtd}</td><td class="num">${Fmt.brl(i.custo)}</td><td class="num">${Fmt.brl(i.qtd * i.custo)}</td><td class="num"><button class="btn-icon" onclick="Modules.compraItens.splice(${idx},1);Modules.renderCompraResumo()">🗑️</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nenhum item adicionado ainda.</p>';
+    box.innerHTML = this.compraItens.length ? `<div class="table-wrap"><table><thead><tr><th>Produto</th><th class="num">Qtd</th><th class="num">Custo un.</th><th class="num">Custo total</th><th>Condição</th><th></th></tr></thead>
+      <tbody>${this.compraItens.map((i, idx) => `<tr><td class="strong">${esc(i.nome)} ${i.produtoId ? '' : '<span class="badge b-blue">novo</span>'}</td><td class="num">${i.qtd}</td><td class="num">${Fmt.brl(i.custo)}</td><td class="num strong">${Fmt.brl(i.qtd * i.custo)}</td><td>${condBadge(i.condicao || 'novo')}</td><td class="num"><button class="btn-icon" onclick="Modules.compraItens.splice(${idx},1);Modules.renderCompraResumo()">🗑️</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nenhum produto adicionado ainda.</p>';
     const sub = this.compraItens.reduce((s, i) => s + i.qtd * i.custo, 0);
-    const frete = fnum('c-frete'), imp = fnum('c-imp');
-    document.getElementById('compra-resumo').innerHTML = `<div class="card" style="margin-top:14px;background:var(--bg-2)">
-      <div class="mini-stat"><span>Subtotal mercadoria</span><b>${Fmt.brl(sub)}</b></div>
-      <div class="mini-stat"><span>Frete</span><b>${Fmt.brl(frete)}</b></div>
-      <div class="mini-stat"><span>Impostos</span><b>${Fmt.brl(imp)}</b></div>
-      <div class="mini-stat" style="font-size:16px"><span class="strong">Total da compra</span><b style="color:var(--green)">${Fmt.brl(sub + frete + imp)}</b></div></div>`;
+    const un = this.compraItens.reduce((s, i) => s + i.qtd, 0);
+    const rs = document.getElementById('compra-resumo'); if (!rs) return;
+    rs.innerHTML = this.compraItens.length ? `<div class="card" style="margin-top:14px;background:var(--bg-2)">
+      <div class="mini-stat"><span>Itens / unidades</span><b>${this.compraItens.length} item(ns) · ${un} un</b></div>
+      <div class="mini-stat" style="font-size:16px"><span class="strong">Custo total da compra</span><b style="color:var(--green)">${Fmt.brl(sub)}</b></div></div>` : '';
   },
   saveCompra() {
-    if (!this.compraItens.length) return Toast.err('Adicione ao menos um item.');
-    const sub = this.compraItens.reduce((s, i) => s + i.qtd * i.custo, 0);
-    const frete = fnum('c-frete'), imp = fnum('c-imp'), total = sub + frete + imp;
-    const rateio = sub ? (frete + imp) / sub : 0; // rateia frete+impostos no custo
+    if (!this.compraItens.length) return Toast.err('Adicione ao menos um produto à compra.');
+    const total = this.compraItens.reduce((s, i) => s + i.qtd * i.custo, 0);
+    const fornId = fval('c-forn') || null, obs = fval('c-obs') || '';
+    const fornNome = fornId ? (DB.get('fornecedores', fornId) || {}).nome : '';
+    const resp = (typeof App !== 'undefined' && App.user() && App.user().nome) ? App.user().nome : 'Admin';
     this.compraItens.forEach(i => {
-      const custoReal = i.custo * (1 + rateio);
       if (i.produtoId) {
         const p = DB.get('produtos', i.produtoId);
         const qtdNova = p.qtd + i.qtd;
-        const custoMedio = ((p.custoMedio || p.custo) * p.qtd + custoReal * i.qtd) / qtdNova;
+        const custoMedio = qtdNova ? (((p.custoMedio || p.custo || 0) * p.qtd) + i.custo * i.qtd) / qtdNova : i.custo;
         DB.update('produtos', i.produtoId, { qtd: qtdNova, custoMedio: Math.round(custoMedio * 100) / 100, custo: i.custo, status: 'disponivel' });
       } else {
-        DB.insert('produtos', { nome: i.nome, sku: 'NEW-' + Date.now().toString(36).toUpperCase().slice(-5), barcode: '', categoria: 'Acessórios', marca: '—', modelo: '', condicao: 'novo', qtd: i.qtd, min: 1, custo: i.custo, custoMedio: Math.round(custoReal * 100) / 100, preco: Math.round(custoReal * 1.6), serie: '', local: 'A definir', status: 'disponivel' });
+        const novo = DB.insert('produtos', { nome: i.nome, sku: 'NEW-' + Date.now().toString(36).toUpperCase().slice(-5), barcode: '', categoria: 'Acessórios', marca: '—', modelo: '', condicao: i.condicao || 'novo', qtd: i.qtd, min: 1, custo: i.custo, custoMedio: Math.round(i.custo * 100) / 100, preco: Math.round(i.custo * 1.6), serie: '', local: 'A definir', status: 'disponivel', criadoEm: new Date().toISOString(), custoHist: [], precoHist: [] });
+        i.produtoId = novo.id;
       }
     });
     const compra = DB.insert('compras', {
-      data: new Date().toISOString(), fornecedorId: fval('c-forn'), nf: fval('c-nf'),
-      itens: this.compraItens, frete, impostos: imp, subtotal: sub, total, status: 'recebido'
+      data: new Date().toISOString(), fornecedorId: fornId, nf: '', obs, responsavel: resp,
+      itens: this.compraItens, frete: 0, impostos: 0, subtotal: total, total, status: 'recebido'
     });
-    DB.logMov('compra', 'Entrada de mercadoria — ' + (fval('c-nf') || 'sem NF') + ' (' + this.compraItens.reduce((s, i) => s + i.qtd, 0) + ' un)', { valor: total, refId: compra.id });
-    DB.logFin({ tipo: 'saida', categoria: 'Compra de mercadoria', descricao: 'Compra ' + (fval('c-nf') || compra.id.slice(-4)), valor: total, status: 'pago', origem: 'compra', refId: compra.id });
-    Modal.close(); Toast.ok('Mercadoria recebida e estoque atualizado.'); App.go('compras');
+    DB.logMov('compra', 'Compra lançada — ' + this.compraItens.map(i => i.qtd + 'x ' + i.nome).join(', ') + (fornNome ? ' (' + fornNome + ')' : '') + (obs ? ' · ' + obs : ''), { valor: total, refId: compra.id });
+    DB.logFin({ tipo: 'saida', categoria: 'Compra de mercadoria', descricao: 'Compra' + (fornNome ? ' — ' + fornNome : '') + (obs ? ' (' + obs + ')' : ''), valor: total, status: 'pago', origem: 'compra', refId: compra.id });
+    Modal.close(); Toast.ok('Compra salva! Estoque e custo médio atualizados.'); App.go('compras');
   },
 
   /* ===================== AVALIAÇÃO DE USADOS ===================== */
@@ -2321,7 +2345,8 @@ const ProdHist = {
     /* ----- ENTRADAS ----- */
     const entradas = [];
     DB.all('compras').forEach(c => (c.itens || []).forEach(it => { if (match(it)) {
-      entradas.push({ data: c.data, tipo: 'Compra de fornecedor', qtd: it.qtd, custoUnit: it.custo, custoTotal: it.qtd * it.custo, fornecedor: fmap[c.fornecedorId] || '—', origem: c.nf ? ('NF ' + c.nf) : ('Compra #' + String(c.id).slice(-4)), obs: c.nf ? ('NF ' + c.nf) : '', responsavel: 'Admin', serie: '' });
+      const obs = [c.obs, it.condicao ? ('cond.: ' + it.condicao) : '', c.nf ? ('NF ' + c.nf) : ''].filter(Boolean).join(' · ');
+      entradas.push({ data: c.data, tipo: 'Compra de fornecedor', qtd: it.qtd, custoUnit: it.custo, custoTotal: it.qtd * it.custo, fornecedor: fmap[c.fornecedorId] || '—', origem: 'Compra #' + String(c.id).slice(-4), obs: obs, responsavel: c.responsavel || 'Admin', serie: '' });
     }}));
     this.vendas().forEach(v => (v.usados || []).forEach(u => { if (u.produtoId === id) {
       entradas.push({ data: v.data, tipo: 'Produto usado recebido como pagamento', qtd: 1, custoUnit: u.valor, custoTotal: u.valor, fornecedor: 'Cliente', origem: 'Venda #' + String(v.id).slice(-4), obs: u.estado || '', responsavel: v.usuario || 'Admin', serie: u.serie || '' });
@@ -2677,6 +2702,8 @@ Modules.vendasDia = function () {
 
   <div class="grid kpis" id="vd-kpis" style="margin-bottom:18px"></div>
 
+  <div style="margin-bottom:18px"><div class="section-title" id="vd-vcount">Vendas</div><div id="vd-vendas"></div></div>
+
   <div class="grid cols-2">
     <div><div class="section-title" id="vd-count">Produtos vendidos</div><div id="vd-table"></div></div>
     <div class="card"><div class="section-title">🏆 Mais vendidos do dia</div><div id="vd-ranking"></div></div>
@@ -2748,10 +2775,53 @@ Modules.vdData = function () {
   return { start, end, vendas, items, fat, custoTotal, taxasCartao, lucroB, lucroLiquido, qtdProd, nVendas, ticket: nVendas ? fat / nVendas : 0, liquido: lucroLiquido };
 };
 
+/* Cálculo financeiro completo de UMA venda (com rateio de taxas por item) */
+Modules.vdVendaCalc = function (v) {
+  const taxaTotal = v.taxaTotal != null ? v.taxaTotal : (typeof Taxas !== 'undefined' ? Taxas.feeVenda(v) : 0);
+  const base = (v.itens || []).reduce((s, x) => s + x.preco * x.qtd, 0);
+  const itens = (v.itens || []).map(i => {
+    const valor = i.preco * i.qtd, custo = (i.custo || 0) * i.qtd;
+    const taxaItem = base > 0 ? taxaTotal * (valor / base) : 0;
+    return { nome: i.nome, qtd: i.qtd, precoUnit: i.preco, custoUnit: i.custo || 0, valor, custo,
+      lucroBruto: valor - custo, taxaItem, lucroLiq: valor - custo - taxaItem, semCusto: !(i.custo > 0),
+      precoOriginal: i.precoOriginal, precoMotivo: i.precoMotivo };
+  });
+  const bruto = v.bruto != null ? v.bruto : base;
+  const desconto = v.desconto || 0;
+  const liquido = v.total - taxaTotal;
+  const lucroTotal = itens.reduce((s, i) => s + i.lucroLiq, 0);
+  const qtdItens = (v.itens || []).reduce((s, i) => s + i.qtd, 0);
+  return { taxaTotal, base, itens, bruto, desconto, total: v.total, liquido, lucroTotal, qtdItens };
+};
+
 Modules.vdRender = function () {
   if (!document.getElementById('vd-kpis')) return;
   const d = this.vdData();
   const canFin = App.canFinance();
+
+  // ----- Vendas completas (uma linha por venda) -----
+  const ve = document.getElementById('vd-vendas');
+  if (ve) {
+    const q = (fval('vd-prod') || '').toLowerCase();
+    const vendas = d.vendas.filter(v => !q || (v.itens || []).some(i => i.nome.toLowerCase().includes(q)));
+    const vrows = vendas.map(v => {
+      const c = this.vdVendaCalc(v);
+      const pagStr = v.pagamentos.map(p => p.tipo + (p.parcelas > 1 ? ' ' + p.parcelas + 'x' : '')).join(', ');
+      return `<tr style="cursor:pointer" onclick="Modules.vdDetail('${v.id}')">
+        <td class="strong">#${v.id.slice(-4)}</td>
+        <td>${Fmt.time(v.data)}<div class="muted" style="font-size:11px">${Fmt.date(v.data)}</div></td>
+        <td class="num">${c.qtdItens}</td>
+        <td class="num strong">${Fmt.brl(v.total)}</td>
+        <td><span class="badge b-gray">${esc(pagStr)}</span></td>
+        ${canFin ? `<td class="num strong" style="color:${c.lucroTotal >= 0 ? 'var(--green)' : 'var(--red)'}">${Fmt.brl(c.lucroTotal)}</td>` : ''}
+        <td>${v.cancelada ? '<span class="badge b-red">Cancelada</span>' : '<span class="badge b-green">Concluída</span>'}</td>
+      </tr>`;
+    }).join('');
+    document.getElementById('vd-vcount').innerHTML = `Vendas <span class="muted" style="font-weight:500">${vendas.length} venda(s) no período</span>`;
+    ve.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>Nº</th><th>Horário</th><th class="num">Itens</th><th class="num">Total</th><th>Pagamento</th>${canFin ? '<th class="num">Lucro total</th>' : ''}<th>Status</th></tr></thead>
+      <tbody>${vrows || '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">Nenhuma venda no período.</td></tr>'}</tbody></table></div>`;
+  }
   document.getElementById('vd-kpis').innerHTML =
     kpi('Faturamento bruto', Fmt.brl(d.fat), null, '💵', '') +
     (canFin ? kpi('Custo dos produtos', Fmt.brl(d.custoTotal), null, '🏷️', '') : '') +
@@ -2800,21 +2870,35 @@ Modules.vdRender = function () {
 
 Modules.vdDetail = function (id) {
   const v = DB.get('vendas', id); if (!v) return;
-  const itensHtml = v.itens.map(i => `<tr><td>${esc(i.nome)}${i.precoOriginal != null && i.preco !== i.precoOriginal ? `<div class="muted" style="font-size:11px">preço alterado: <s>${Fmt.brl(i.precoOriginal)}</s> → ${Fmt.brl(i.preco)}${i.precoMotivo ? ' · ' + esc(i.precoMotivo) : ''}</div>` : ''}</td><td class="num">${i.qtd}</td><td class="num">${Fmt.brl(i.preco)}</td><td class="num strong">${Fmt.brl(i.preco * i.qtd)}</td></tr>`).join('');
+  const fin = App.canFinance();
+  const c = this.vdVendaCalc(v);
+  const itensHtml = c.itens.map(i => `<tr>
+      <td>${esc(i.nome)}${i.precoOriginal != null && i.precoUnit !== i.precoOriginal ? `<div class="muted" style="font-size:11px">preço alterado: <s>${Fmt.brl(i.precoOriginal)}</s> → ${Fmt.brl(i.precoUnit)}${i.precoMotivo ? ' · ' + esc(i.precoMotivo) : ''}</div>` : ''}</td>
+      <td class="num">${i.qtd}</td>
+      <td class="num">${Fmt.brl(i.precoUnit)}</td>
+      ${fin ? `<td class="num muted">${i.semCusto ? '<span title="Custo não cadastrado">⚠️</span> ' : ''}${Fmt.brl(i.custoUnit)}</td>` : ''}
+      ${fin ? `<td class="num">${Fmt.brl(i.lucroBruto)}</td>` : ''}
+      ${fin ? `<td class="num" style="color:${i.lucroLiq >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:700">${Fmt.brl(i.lucroLiq)}</td>` : ''}
+      <td class="num strong">${Fmt.brl(i.valor)}</td></tr>`).join('');
+  const colspan = fin ? 4 : 3;
   Modal.open({
     title: '🧾 Venda #' + id.slice(-4) + (v.cancelada ? ' — CANCELADA' : ''),
     body: `
       <div class="card" style="background:var(--bg-2);margin-bottom:14px">
+        <div class="mini-stat"><span>Número da venda</span><b>#${id.slice(-4)}</b></div>
         <div class="mini-stat"><span>Data e horário</span><b>${Fmt.datetime(v.data)}</b></div>
         <div class="mini-stat"><span>Forma de pagamento</span><b>${v.pagamentos.map(p => p.tipo + (p.parcelas > 1 ? ' ' + p.parcelas + 'x' : '')).join(', ')}</b></div>
         ${(v.usados && v.usados.length) ? v.usados.map(u => `<div class="mini-stat"><span>🔄 Usado: ${esc(u.nome)}${u.estado ? ' (' + esc(u.estado) + ')' : ''}</span><b style="color:var(--green)">− ${Fmt.brl(u.valor)}</b></div>`).join('') + `<div class="mini-stat"><span class="strong">Total em usados</span><b style="color:var(--green)">− ${Fmt.brl(v.usadoValor || 0)}</b></div>` : (v.usadoEntrada ? `<div class="mini-stat"><span>Usado recebido na troca</span><b style="color:var(--green)">🔄 ${esc(v.usadoEntrada)}</b></div>` : '')}
       </div>
-      <div class="table-wrap"><table><thead><tr><th>Produto</th><th class="num">Qtd</th><th class="num">Valor unit.</th><th class="num">Total</th></tr></thead><tbody>${itensHtml}</tbody></table></div>
+      <div class="section-title" style="margin:0 0 8px">Produtos vendidos</div>
+      <div class="table-wrap"><table><thead><tr><th>Produto</th><th class="num">Qtd</th><th class="num">Valor unit.</th>${fin ? '<th class="num">Custo unit.</th><th class="num">Lucro bruto</th><th class="num">Lucro líquido</th>' : ''}<th class="num">Total</th></tr></thead><tbody>${itensHtml}</tbody></table></div>
       <div class="card" style="background:var(--bg-2);margin-top:14px">
-        <div class="mini-stat"><span>Subtotal</span><b>${Fmt.brl(v.bruto)}</b></div>
-        ${v.desconto ? `<div class="mini-stat"><span>Desconto aplicado</span><b style="color:var(--red)">− ${Fmt.brl(v.desconto)}</b></div>` : ''}
+        <div class="mini-stat"><span>Valor bruto</span><b>${Fmt.brl(c.bruto)}</b></div>
+        ${c.desconto ? `<div class="mini-stat"><span>Desconto aplicado</span><b style="color:var(--red)">− ${Fmt.brl(c.desconto)}</b></div>` : ''}
+        ${fin ? `<div class="mini-stat"><span>Taxas (cartão)</span><b style="color:var(--red)">− ${Fmt.brl(c.taxaTotal)}</b></div>` : ''}
         <div class="mini-stat" style="font-size:16px"><span class="strong">Total da venda</span><b style="color:var(--green)">${Fmt.brl(v.total)}</b></div>
-        ${App.canFinance() ? `<div class="mini-stat"><span>Lucro da operação</span><b style="color:var(--green)">${Fmt.brl(v.lucro)}</b></div>` : ''}
+        ${fin ? `<div class="mini-stat"><span>Valor líquido (após taxas)</span><b>${Fmt.brl(c.liquido)}</b></div>` : ''}
+        ${fin ? `<div class="mini-stat" style="font-size:15px"><span class="strong">Lucro total da operação</span><b style="color:${c.lucroTotal >= 0 ? 'var(--green)' : 'var(--red)'}">${Fmt.brl(c.lucroTotal)}</b></div>` : ''}
       </div>`,
     foot: v.cancelada
       ? `<span class="badge b-red" style="margin-right:auto">Venda cancelada em ${Fmt.date(v.canceladaEm || v.data)}</span>${typeof Print !== 'undefined' ? `<button class="btn-ghost" onclick="Print.print(DB.get('vendas','${id}'))">🖨️ Reimprimir</button>` : ''}<button class="btn-ghost" onclick="Modal.close()">Fechar</button>`
