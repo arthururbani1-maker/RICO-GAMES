@@ -496,7 +496,7 @@ td .muted,.muted{color:var(--txt-3)}
       <div class="sidebar-foot">
         <div class="sync-pill"><span class="dot"></span> <span id="sync-label">Offline · salvo localmente</span></div>
         <a class="nav-item small" onclick="App.logout()"><span class="ico">⏻</span> Sair</a>
-        <div style="font-size:10.5px;color:var(--txt-3);padding:6px 4px 0;opacity:.8">versão 2.8.2 · lucro corrige custo</div>
+        <div style="font-size:10.5px;color:var(--txt-3);padding:6px 4px 0;opacity:.8">versão 2.9 · financeiro fiel</div>
       </div>
     </aside>
     <div class="sidebar-overlay" id="sidebar-overlay" onclick="App.toggleSidebar(false)"></div>
@@ -1542,7 +1542,8 @@ const Modules = {
         <div class="field"><label>Data da entrada</label><input id="ent-data" type="date" value="${new Date().toISOString().slice(0, 10)}"></div>
         <div class="field full"><label>Observação</label><input id="ent-obs" placeholder="Ex: nota fiscal, lote, etc."></div>
       </div>
-      <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;color:var(--txt-2)"><input type="checkbox" id="ent-fin"> Também lançar como compra no Financeiro (contas a pagar)</label>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;color:var(--txt-2)"><input type="checkbox" id="ent-fin" checked> Lançar saída no Financeiro (pago à vista)</label>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;color:var(--txt-2)"><input type="checkbox" id="ent-prazo"> 📅 A prazo — lançar em Contas a Pagar (com vencimento) <input type="date" id="ent-venc" style="margin-left:6px"></label>
     </div>
     <div class="card">
       <div class="section-title">3. Produtos a dar entrada</div>
@@ -1603,8 +1604,12 @@ const Modules = {
       DB.logMov('compra', 'Entrada de estoque: ' + l.qtd + 'x ' + l.nome + (fornNome ? ' (' + fornNome + ')' : '') + (obs ? ' · ' + obs : ''), { valor: l.qtd * l.custo, data });
       totV += l.qtd * l.custo;
     });
-    if (fchk('ent-fin')) {
-      DB.logFin({ tipo: 'saida', categoria: 'Compras de mercadorias', subcategoria: 'Entrada de estoque', descricao: 'Entrada de estoque' + (fornNome ? ' — ' + fornNome : '') + (obs ? ' (' + obs + ')' : ''), valor: totV, emissao: data, vencimento: data, data, pago: 0, status: 'pendente', fornecedorId: fornId || null, formaPagamento: 'Boleto', origem: 'compra' });
+    if (fchk('ent-fin') || fchk('ent-prazo')) {
+      const aPrazo = fchk('ent-prazo');
+      const venc = fval('ent-venc') ? (fval('ent-venc') + 'T12:00:00') : data;
+      const descFin = 'Entrada de estoque' + (fornNome ? ' — ' + fornNome : '') + (obs ? ' (' + obs + ')' : '');
+      if (aPrazo) DB.logFin({ tipo: 'saida', categoria: 'Compra de mercadoria', subcategoria: 'A prazo', descricao: descFin, valor: totV, emissao: data, vencimento: venc, data: venc, pago: 0, status: 'pendente', fornecedorId: fornId || null, formaPagamento: 'Boleto', origem: 'compra' });
+      else DB.logFin({ tipo: 'saida', categoria: 'Compra de mercadoria', subcategoria: 'Entrada de estoque', descricao: descFin, valor: totV, emissao: data, vencimento: data, data, pago: totV, status: 'pago', fornecedorId: fornId || null, formaPagamento: 'À vista', origem: 'compra' });
     }
     Toast.ok('Entrada registrada! Estoque e custo médio atualizados.');
     this.entradaLines = []; App.go('estoque');
@@ -1972,12 +1977,14 @@ const Modules = {
         if (u.statusInicial && u.statusInicial !== 'Disponível') patch.status = stMap[u.statusInicial] || p.status;
         DB.update('produtos', u.produtoId, patch);
       }
-      DB.logMov('usado', 'Usado recebido na troca: ' + u.nome + (u.serie ? ' (S/N ' + u.serie + ')' : '') + ' — ' + Fmt.brl(u.valor) + ' · venda #' + venda.id.slice(-4), { valor: u.valor, refId: venda.id });
-      DB.logFin({ tipo: 'saida', categoria: 'Compra de usado', subcategoria: 'Troca', descricao: 'Usado recebido em troca: ' + u.nome + ' (venda #' + venda.id.slice(-4) + ')', valor: u.valor, status: 'pago', origem: 'usado', refId: venda.id });
+      // Usado recebido como pagamento é uma forma NÃO-financeira: só entra no estoque/histórico,
+      // não gera saída financeira, não mexe no caixa e não cria conta a pagar.
+      DB.logMov('usado', 'Usado recebido na troca: ' + u.nome + (u.serie ? ' (S/N ' + u.serie + ')' : '') + ' — ' + Fmt.brl(u.valor) + ' · venda #' + venda.id.slice(-4) + ' (forma de pagamento não-financeira)', { valor: u.valor, refId: venda.id });
     });
     const formaStr = pagamentos.map(p => p.tipo + (p.parcelas > 1 ? ' ' + p.parcelas + 'x' : '')).join(' + ');
     DB.logMov('venda', 'Venda: ' + c.itens.map(i => i.qtd + 'x ' + i.nome).join(', ') + (usados.length ? ' (troca c/ ' + usados.length + ' usado(s))' : ''), { valor: totalVenda, refId: venda.id });
-    DB.logFin({ tipo: 'entrada', categoria: 'Venda', descricao: 'Venda PDV #' + venda.id.slice(-4) + ' (' + formaStr + (usados.length ? ' + usados' : '') + ')', valor: totalVenda, taxa: taxaTotal, liquido: liquido, status: 'pago', origem: 'venda', refId: venda.id });
+    // financeiro registra só o valor financeiro recebido (exclui a parte paga com usado, que é não-financeira)
+    DB.logFin({ tipo: 'entrada', categoria: 'Venda', descricao: 'Venda PDV #' + venda.id.slice(-4) + ' (' + formaStr + (usados.length ? ' + usado (não-financeiro)' : '') + ')', valor: total, taxa: taxaTotal, liquido: total - taxaTotal, status: 'pago', origem: 'venda', refId: venda.id });
     // dinheiro líquido (descontado troco) entra no Caixa
     const dinheiro = pagamentos.filter(p => p.tipo === 'Dinheiro').reduce((s, p) => s + p.valor, 0);
     const netCash = Math.max(0, dinheiro - Math.max(0, soma - total));
@@ -2042,10 +2049,12 @@ const Modules = {
         <td>${esc(r.resp)}</td></tr>`).join('') || '<tr><td colspan="8" class="muted" style="text-align:center;padding:30px">Nenhuma compra lançada ainda.</td></tr>'}</tbody></table></div>`;
   },
   compraItens: [],
+  compraTogglePrazo() { const w = document.getElementById('c-venc-wrap'); if (w) w.style.display = fchk('c-prazo') ? 'block' : 'none'; },
   compraForm() {
     this.compraItens = [];
     const fs = DB.all('fornecedores');
     const resp = (typeof App !== 'undefined' && App.user() && App.user().nome) ? App.user().nome : 'Admin';
+    const formasPg = ['Dinheiro', 'PIX', 'Débito', 'Crédito à vista', 'Transferência', 'Boleto'];
     Modal.open({
       title: '🛒 Nova compra', wide: true,
       body: `<div class="section-title" style="margin-top:0">Produto comprado</div>
@@ -2058,6 +2067,12 @@ const Modules = {
       </div>
       <button class="btn-primary btn-sm" style="margin-top:10px" onclick="Modules.addCompraItem()">+ Adicionar à compra</button>
       <div id="compra-itens" style="margin-top:14px"></div>
+      <div class="form-grid" style="margin-top:14px">
+        <div class="field"><label>Forma de pagamento</label><select id="c-forma">${formasPg.map(f => `<option ${f === 'Dinheiro' ? 'selected' : ''}>${f}</option>`).join('')}</select></div>
+        <div class="field"><label>&nbsp;</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;padding-top:4px"><input type="checkbox" id="c-prazo" onchange="Modules.compraTogglePrazo()"> 📅 Compra a prazo (lançar em Contas a Pagar)</label></div>
+        <div class="field" id="c-venc-wrap" style="display:none"><label>Vencimento</label><input type="date" id="c-venc"></div>
+      </div>
+      <div class="muted" style="font-size:11.5px;margin-top:2px">Por padrão a compra é <b>paga à vista</b> (registra a saída no financeiro/caixa e NÃO cria conta a pagar). Marque "a prazo" só se o pagamento ficará pendente.</div>
       <details style="margin-top:14px"><summary style="cursor:pointer;color:var(--txt-2);font-size:13px">Opcional — fornecedor e observação</summary>
         <div class="form-grid" style="margin-top:10px">
           <div class="field"><label>Fornecedor (opcional)</label><select id="c-forn"><option value="">— sem fornecedor —</option>${fs.map(f => `<option value="${f.id}">${esc(f.nome)}</option>`).join('')}</select></div>
@@ -2116,13 +2131,27 @@ const Modules = {
         i.produtoId = novo.id;
       }
     });
+    const forma = fval('c-forma') || 'Dinheiro';
+    const aPrazo = fchk('c-prazo');
+    const hojeISO = new Date().toISOString();
+    const venc = fval('c-venc') ? (fval('c-venc') + 'T12:00:00') : hojeISO;
     const compra = DB.insert('compras', {
-      data: new Date().toISOString(), fornecedorId: fornId, nf: '', obs, responsavel: resp,
+      data: hojeISO, fornecedorId: fornId, nf: '', obs, responsavel: resp, formaPagamento: forma, aPrazo,
       itens: this.compraItens, frete: 0, impostos: 0, subtotal: total, total, status: 'recebido'
     });
-    DB.logMov('compra', 'Compra lançada — ' + this.compraItens.map(i => i.qtd + 'x ' + i.nome).join(', ') + (fornNome ? ' (' + fornNome + ')' : '') + (obs ? ' · ' + obs : ''), { valor: total, refId: compra.id });
-    DB.logFin({ tipo: 'saida', categoria: 'Compra de mercadoria', descricao: 'Compra' + (fornNome ? ' — ' + fornNome : '') + (obs ? ' (' + obs + ')' : ''), valor: total, status: 'pago', origem: 'compra', refId: compra.id });
-    Modal.close(); Toast.ok('Compra salva! Estoque e custo médio atualizados.'); App.go('compras');
+    DB.logMov('compra', 'Compra lançada — ' + this.compraItens.map(i => i.qtd + 'x ' + i.nome).join(', ') + (fornNome ? ' (' + fornNome + ')' : '') + ' · ' + (aPrazo ? 'a prazo' : forma) + (obs ? ' · ' + obs : ''), { valor: total, refId: compra.id });
+    const descFin = 'Compra' + (fornNome ? ' — ' + fornNome : '') + (obs ? ' (' + obs + ')' : '');
+    if (aPrazo) {
+      // Exceção: compra a prazo → cria conta a pagar (pendente, com vencimento)
+      DB.logFin({ tipo: 'saida', categoria: 'Compra de mercadoria', subcategoria: 'A prazo', descricao: descFin, valor: total, pago: 0, status: 'pendente', emissao: hojeISO, vencimento: venc, data: venc, fornecedorId: fornId || null, formaPagamento: forma, origem: 'compra', refId: compra.id });
+      Toast.ok('Compra salva! Lançada em Contas a Pagar (vencimento ' + Fmt.date(venc) + ').');
+    } else {
+      // Padrão: paga à vista → saída financeira efetiva (NÃO cria conta a pagar)
+      DB.logFin({ tipo: 'saida', categoria: 'Compra de mercadoria', descricao: descFin + ' · ' + forma, valor: total, pago: total, status: 'pago', emissao: hojeISO, vencimento: hojeISO, data: hojeISO, fornecedorId: fornId || null, formaPagamento: forma, origem: 'compra', refId: compra.id });
+      if (forma === 'Dinheiro' && typeof Caixa !== 'undefined') Caixa.add({ fluxo: 'saida', tipo: 'Compra de mercadoria', origem: 'Compra' + (fornNome ? ' — ' + fornNome : ''), categoria: 'Compra', valor: total, obs: this.compraItens.map(i => i.qtd + 'x ' + i.nome).join(', '), refId: compra.id });
+      Toast.ok('Compra salva à vista (' + forma + ')! Estoque e custo médio atualizados.');
+    }
+    Modal.close(); App.go('compras');
   },
 
   /* ===================== AVALIAÇÃO DE USADOS ===================== */
