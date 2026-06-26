@@ -496,7 +496,7 @@ td .muted,.muted{color:var(--txt-3)}
       <div class="sidebar-foot">
         <div class="sync-pill"><span class="dot"></span> <span id="sync-label">Offline · salvo localmente</span></div>
         <a class="nav-item small" onclick="App.logout()"><span class="ico">⏻</span> Sair</a>
-        <div style="font-size:10.5px;color:var(--txt-3);padding:6px 4px 0;opacity:.8">versão 2.9 · financeiro fiel</div>
+        <div style="font-size:10.5px;color:var(--txt-3);padding:6px 4px 0;opacity:.8">versão 2.9.1 · excluir lançamentos</div>
       </div>
     </aside>
     <div class="sidebar-overlay" id="sidebar-overlay" onclick="App.toggleSidebar(false)"></div>
@@ -4530,6 +4530,7 @@ Modules.finLista = function (tipo) {
     <button class="btn-ghost" onclick="Modules.finForm('${tipo}')">+ Novo</button>
     <button class="btn-ghost" onclick="Modules.finExportLista('${tipo}','xlsx')">⬇️ Excel</button>
     <button class="btn-ghost" onclick="Modules.finExportLista('${tipo}','pdf')">🖨️ PDF</button>
+    ${ehPagar && (typeof App === 'undefined' || App.isAdmin()) && list.some(r => r.origem === 'usado') ? `<button class="btn-ghost" style="color:var(--red)" onclick="Modules.finLimparUsados()">🧹 Limpar lançamentos de usado (troca)</button>` : ''}
   </div>
   <div id="${ehPagar ? 'fp-table' : 'fr-table'}">${this.finListaTable(tipo)}</div>`;
 };
@@ -4545,9 +4546,10 @@ Modules.finListaTable = function (tipo) {
   const rows = list.map(r => {
     const st = F.status(r), dias = F.diasAte(F.venc(r)), open = F.isOpen(r);
     const vencCol = `${Fmt.date(F.venc(r))}${open && dias < 0 ? ` <span class="muted" style="color:var(--red)">${-dias}d atraso</span>` : open && dias <= 7 ? ` <span class="muted">${dias === 0 ? 'hoje' : 'em ' + dias + 'd'}</span>` : ''}`;
-    const acoes = open && st !== 'cancelado'
+    const del = (typeof App === 'undefined' || App.isAdmin()) ? ` <button class="btn-icon" title="Excluir lançamento" onclick="Modules.finExcluir('${r.id}')">🗑️</button>` : '';
+    const acoes = (open && st !== 'cancelado'
       ? `<button class="btn-ghost btn-sm" onclick="Modules.finPagar('${r.id}')">${ehPagar ? '✓ Pagar' : '✓ Receber'}</button> <button class="btn-icon" onclick="Modules.finForm('${tipo}','${r.id}')">✏️</button>`
-      : `<button class="btn-icon" onclick="Modules.finForm('${tipo}','${r.id}')">✏️</button>`;
+      : `<button class="btn-icon" onclick="Modules.finForm('${tipo}','${r.id}')">✏️</button>`) + del;
     return ehPagar
       ? `<tr><td class="strong">${esc(r.descricao)}</td><td>${esc(r.categoria || '—')}</td><td>${esc(F.fornNome(r.fornecedorId) || '—')}</td><td>${Fmt.date(F.emis(r))}</td><td>${vencCol}</td><td class="num">${Fmt.brl(r.valor)}</td><td class="num muted">${Fmt.brl(F.pagoVal(r))}</td><td class="num strong">${Fmt.brl(F.restante(r))}</td><td>${finBadge(st)}</td><td class="num">${acoes}</td></tr>`
       : `<tr><td class="strong">${esc(r.descricao)}</td><td>${esc(r.subcategoria || r.categoria || '—')}</td><td>${Fmt.date(F.emis(r))}</td><td>${vencCol}</td><td class="num">${Fmt.brl(r.valor)}</td><td class="num muted">${Fmt.brl(F.pagoVal(r))}</td><td class="num strong">${Fmt.brl(F.restante(r))}</td><td>${esc(r.formaPagamento || '—')}</td><td>${finBadge(st)}</td><td class="num">${acoes}</td></tr>`;
@@ -4628,6 +4630,26 @@ Modules.finSave = function (tipo, id) {
 };
 Modules.finCancelar = function (id) {
   Modal.confirm('Cancelar esta conta? Ela deixa de contar no fluxo.', () => { DB.update('financeiro', id, { status: 'cancelado' }); Modal.close(); Toast.ok('Conta cancelada.'); this.finRenderTab(); }, 'Cancelar conta');
+};
+Modules.finLimparUsados = function () {
+  if (typeof App !== 'undefined' && !App.isAdmin()) return Toast.err('Apenas o administrador pode fazer essa limpeza.');
+  const antigos = DB.all('financeiro').filter(r => r.origem === 'usado');
+  if (!antigos.length) return Toast.ok('Nenhum lançamento de usado para remover.');
+  const total = antigos.reduce((s, r) => s + (r.valor || 0), 0);
+  Modal.confirm('Remover <b>' + antigos.length + '</b> lançamento(s) antigo(s) de usado recebido em troca (total ' + Fmt.brl(total) + ')?<br>Esses lançamentos não deveriam estar no financeiro (usado é forma de pagamento não-financeira). O estoque e o histórico do produto não são afetados.', () => {
+    antigos.forEach(r => DB.remove('financeiro', r.id));
+    Modal.close(); Toast.ok(antigos.length + ' lançamento(s) de usado removido(s).'); this.finRenderTab();
+  }, 'Remover lançamentos');
+};
+Modules.finExcluir = function (id) {
+  if (typeof App !== 'undefined' && !App.isAdmin()) return Toast.err('Apenas o administrador pode excluir lançamentos.');
+  const r = DB.get('financeiro', id); if (!r) return;
+  const linkCaixa = r.refId ? DB.all('caixa').filter(c => c.refId === r.refId).length : 0;
+  Modal.confirm('Excluir definitivamente o lançamento "<b>' + esc(r.descricao || '') + '</b>" de ' + Fmt.brl(r.valor) + '?<br>Essa ação não pode ser desfeita.' + (linkCaixa ? '<br><span class="muted">Também remove ' + linkCaixa + ' lançamento(s) ligado(s) no Caixa.</span>' : ''), () => {
+    DB.remove('financeiro', id);
+    if (r.refId) DB.all('caixa').filter(c => c.refId === r.refId).forEach(c => DB.remove('caixa', c.id));
+    Modal.close(); Toast.ok('Lançamento excluído.'); this.finRenderTab();
+  }, 'Excluir lançamento');
 };
 
 /* ---------- Análise Financeira por Produto ---------- */
