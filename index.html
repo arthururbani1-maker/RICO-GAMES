@@ -459,6 +459,21 @@ td .muted,.muted{color:var(--txt-3)}
 .kpi-sub .up{color:var(--green);font-weight:700} .kpi-sub .down{color:var(--red);font-weight:700}
 @media (max-width:640px){ .bi-periodbar{flex-direction:column;align-items:flex-start} }
 
+/* ===== Insights Inteligentes ===== */
+.ins-group-title{font-weight:800;font-size:14px;margin:14px 0 8px;display:flex;align-items:center;gap:8px}
+.ins-group-title.alta{color:var(--red)} .ins-group-title.media{color:var(--amber)} .ins-group-title.op{color:var(--green)}
+.ins-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-bottom:8px}
+.ins-card{background:var(--bg-2);border:1px solid var(--line);border-radius:12px;padding:13px 15px;border-left:4px solid var(--line)}
+.ins-card.alta{border-left-color:var(--red)} .ins-card.media{border-left-color:var(--amber)} .ins-card.op{border-left-color:var(--green)}
+.ins-h{font-size:14px;margin-bottom:6px}
+.ins-oque{font-size:13px;color:var(--txt);margin-bottom:8px;line-height:1.4}
+.ins-meta{font-size:12px;color:var(--txt-2);margin-bottom:4px;line-height:1.4}
+.ins-tag{display:inline-block;font-size:10px;font-weight:700;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;margin-right:4px;color:var(--txt-2)}
+.ins-acao{font-size:12.5px;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);color:var(--txt);line-height:1.4}
+.ex-op{border-top:3px solid var(--green)} .ex-risk{border-top:3px solid var(--red)}
+.ex-li{padding:8px 0;border-bottom:1px solid var(--line-soft,rgba(128,128,128,.12))}
+.ex-t{font-weight:600;font-size:13px} .ex-s{font-size:11.5px;color:var(--txt-2);margin-top:2px}
+
 </style>
   <script>
     /* Aplica o tema o quanto antes para evitar "flash" ao carregar */
@@ -530,7 +545,7 @@ td .muted,.muted{color:var(--txt-3)}
       <div class="sidebar-foot">
         <div class="sync-pill"><span class="dot"></span> <span id="sync-label">Offline · salvo localmente</span></div>
         <a class="nav-item small" onclick="App.logout()"><span class="ico">⏻</span> Sair</a>
-        <div style="font-size:10.5px;color:var(--txt-3);padding:6px 4px 0;opacity:.8">versão 3.8 · período nos relatórios</div>
+        <div style="font-size:10.5px;color:var(--txt-3);padding:6px 4px 0;opacity:.8">versão 3.9 · insights inteligentes</div>
       </div>
     </aside>
     <div class="sidebar-overlay" id="sidebar-overlay" onclick="App.toggleSidebar(false)"></div>
@@ -5424,7 +5439,7 @@ function periodOptsHtml(sel) { return [['all', 'Todo o período'], ['hoje', 'Hoj
 
 Modules.biState = { tab: 'geral', trend: 'dia', sel: [], periodo: '30d', de: '', ate: '' };
 Modules.relatorios = function () {
-  const tabs = [['geral', '📊 Visão geral'], ['pagamentos', '💳 Formas de pagamento'], ['prevendas', '📋 Pré-vendas'], ['cross', '🔗 Vendas cruzadas'], ['rankings', '🏆 Rankings'], ['pesquisa', '🔍 Pesquisa & comparação'], ['categorias', '🗂️ Categorias'], ['tendencias', '📈 Tendências'], ['rentab', '💎 Rentabilidade'], ['estoque', '📦 Estoque']];
+  const tabs = [['geral', '📊 Visão geral'], ['insights', '🧠 Insights'], ['pagamentos', '💳 Formas de pagamento'], ['prevendas', '📋 Pré-vendas'], ['cross', '🔗 Vendas cruzadas'], ['rankings', '🏆 Rankings'], ['pesquisa', '🔍 Pesquisa & comparação'], ['categorias', '🗂️ Categorias'], ['tendencias', '📈 Tendências'], ['rentab', '💎 Rentabilidade'], ['estoque', '📦 Estoque']];
   const st = this.biState, r = BI.range(st.periodo, st.de, st.ate);
   setTimeout(() => Modules.biRender(), 20);
   return `
@@ -5474,14 +5489,14 @@ Modules.biRangeCtx = function () {
 Modules.biInit = function () { this.biRender(); };
 Modules.biSetTab = function (t) {
   this.biState.tab = t;
-  const keys = ['geral', 'pagamentos', 'prevendas', 'cross', 'rankings', 'pesquisa', 'categorias', 'tendencias', 'rentab', 'estoque'];
+  const keys = ['geral', 'insights', 'pagamentos', 'prevendas', 'cross', 'rankings', 'pesquisa', 'categorias', 'tendencias', 'rentab', 'estoque'];
   document.querySelectorAll('#bi-subnav .tab').forEach((el, i) => el.classList.toggle('active', keys[i] === t));
   this.biRender();
 };
 Modules.biRender = function () {
   const b = document.getElementById('bi-body'); if (!b) return;
   const t = this.biState.tab;
-  b.innerHTML = ({ geral: this.biGeral, pagamentos: this.biPagamentos, prevendas: this.biPrevendas, cross: this.biCross, rankings: this.biRankings, pesquisa: this.biPesquisa, categorias: this.biCategorias, tendencias: this.biTendencias, rentab: this.biRentab, estoque: this.biEstoque })[t].call(this);
+  b.innerHTML = ({ geral: this.biGeral, insights: this.biInsights, pagamentos: this.biPagamentos, prevendas: this.biPrevendas, cross: this.biCross, rankings: this.biRankings, pesquisa: this.biPesquisa, categorias: this.biCategorias, tendencias: this.biTendencias, rentab: this.biRentab, estoque: this.biEstoque })[t].call(this);
   if (t === 'pesquisa') this.biCompara();
 };
 
@@ -6162,6 +6177,268 @@ Modules.biPrevExport = function () {
     aoa.push(['#' + (p.numero || ''), p.cliente, p.telefone || '', p.produtoNome, p.qtd, r2(p.valorTotal), r2(PV.pago(p)), r2(PV.restante(p)), ps, es, p.dataLimite || '']);
   });
   Exporter.xlsx('prevendas-rico-games-' + new Date().toISOString().slice(0, 10) + '.xlsx', 'Pre-vendas', aoa);
+};
+
+</script>
+  <script>
+/* ============ RICO GAMES ERP — Insights Inteligentes (consultor de negócios) ============
+   Analisa os dados REAIS do período selecionado e gera recomendações fundamentadas.
+   Cada insight informa: o que foi identificado · qual dado · por que importa · qual ação. */
+
+Modules.insightsData = function (ctx) {
+  const vendas = ctx.vendas, vprev = ctx.vprev, r = ctx.r;
+  const spanDays = Math.max(1, Math.round((r.end - r.start) / 86400000));
+  const a = BI.agg(vendas);                 // por produto no período
+  const aMap = {}; a.forEach(x => aMap[x.sku] = x);
+  const T = BI.totals(vendas), P = BI.totals(vprev);
+  const prods = BI.prods();
+  const ls = BI.lastSale();                  // última venda por sku (todo o histórico)
+  const now = Date.now();
+  const estValorTot = prods.reduce((s, p) => s + (p.custoMedio || p.custo || 0) * (p.qtd || 0), 0) || 1;
+  const lucroTot = a.reduce((s, x) => s + x.lucro, 0) || 1;
+  const cards = [];
+  const add = (pri, ico, titulo, oque, dado, porque, acao, score) => cards.push({ pri, ico, titulo, oque, dado, porque, acao, score: score || 0 });
+
+  /* ---- 1. Top produtos por LUCRO (não faturamento) ---- */
+  const topLucro = a.slice().filter(x => x.lucro > 0).sort((x, y) => y.lucro - x.lucro).slice(0, 10);
+
+  /* ---- 2. Margem baixa (< 8%) ---- */
+  const margemBaixa = a.filter(x => x.receita > 0 && x.margemV < 8).sort((x, y) => y.qtd - x.qtd).slice(0, 8);
+  margemBaixa.slice(0, 3).forEach(x => add('media', '📉', 'Margem baixa: ' + x.nome,
+    'Este produto vendeu com margem de apenas ' + Fmt.pct(x.margemV) + '.',
+    x.qtd + ' un vendidas · lucro ' + Fmt.brl(x.lucro) + ' · receita ' + Fmt.brl(x.receita),
+    'Margens abaixo de 8% quase não sobram depois das taxas e despesas.',
+    'Reveja o preço de venda ou negocie um custo menor com o fornecedor.', 100 - x.margemV));
+
+  /* ---- 3. Produtos parados ---- */
+  const parados = prods.filter(p => (p.qtd || 0) > 0).map(p => {
+    const last = ls[p.sku]; const dias = last ? Math.round((now - last) / 86400000) : 999;
+    return { p, dias, valor: (p.custoMedio || p.custo || 0) * p.qtd };
+  }).filter(x => x.dias >= 60).sort((x, y) => y.valor - x.valor);
+  const paradosValor = parados.reduce((s, x) => s + x.valor, 0);
+  const parados90 = parados.filter(x => x.dias >= 90);
+  parados.slice(0, 3).forEach(x => add('alta', '🐌', 'Parado: ' + x.p.nome,
+    'Está há ' + (x.dias >= 999 ? 'muito tempo (nunca vendeu)' : x.dias + ' dias') + ' sem vender.',
+    x.p.qtd + ' un em estoque · ' + Fmt.brl(x.valor) + ' imobilizados',
+    'Produto parado é dinheiro preso que poderia estar girando.',
+    'Faça promoção, reduza o preço, destaque nas redes sociais ou combine com um produto que gira.', x.valor));
+
+  /* ---- 4. Campeões ---- */
+  const campQtd = a.slice().sort((x, y) => y.qtd - x.qtd).slice(0, 5);
+  const campFat = a.slice().sort((x, y) => y.receita - x.receita).slice(0, 5);
+  const campLucro = topLucro.slice(0, 5);
+
+  /* ---- 5/6. Vendem juntos / venda cruzada ---- */
+  const cross = (typeof BI.crossSell === 'function') ? BI.crossSell(vendas).slice(0, 6) : [];
+  cross.filter(c => c.comps.length && c.orders >= 2).slice(0, 2).forEach(c => {
+    const top = c.comps[0]; const pct = c.orders ? Math.round(top.count / c.orders * 100) : 0;
+    if (pct >= 40) add('op', '🔗', 'Vende junto: ' + c.nome,
+      pct + '% de quem levou ' + c.nome + ' também levou ' + top.nome + '.',
+      c.orders + ' vendas com ' + c.nome + ' · ' + top.count + ' junto com ' + top.nome,
+      'Combos aumentam o ticket médio sem custo de aquisição de cliente.',
+      'Ofereça ' + top.nome + ' sempre que vender ' + c.nome + ' (combo/desconto casado).', pct);
+  });
+
+  /* ---- 7. Reposição (dias de estoque) ---- */
+  const reposicao = a.filter(x => x.qtd > 0).map(x => {
+    const p = BI.prodInfo(x.sku); if (!p || p.qtd <= 0) return null;
+    const mediaDia = x.qtd / spanDays; const diasEstoque = mediaDia > 0 ? p.qtd / mediaDia : Infinity;
+    return { nome: x.nome, sku: x.sku, estoque: p.qtd, mediaDia, mediaSem: mediaDia * 7, diasEstoque };
+  }).filter(Boolean).filter(x => isFinite(x.diasEstoque)).sort((x, y) => x.diasEstoque - y.diasEstoque);
+  reposicao.filter(x => x.diasEstoque <= 10).slice(0, 3).forEach(x => add('alta', '📦', 'Vai faltar: ' + x.nome,
+    'Restam cerca de ' + Math.round(x.diasEstoque) + ' dias de estoque.',
+    x.estoque + ' un em estoque · venda média ' + x.mediaSem.toFixed(1) + '/semana',
+    'Ruptura de estoque de item que gira = venda perdida.',
+    'Reponha ' + x.nome + ' antes de acabar.', 100 - x.diasEstoque));
+
+  /* ---- 8. Merecem promoção (parado + margem boa + estoque alto) ---- */
+  const margemMin = 10;
+  const promocao = parados.map(x => aMap[x.p.sku] || { margemV: (x.p.preco - (x.p.custoMedio || x.p.custo)) / (x.p.preco || 1) * 100 })
+    .map((ag, i) => ({ x: parados[i], margem: (parados[i].p.preco - (parados[i].p.custoMedio || parados[i].p.custo)) / (parados[i].p.preco || 1) * 100 }))
+    .filter(o => o.margem > margemMin + 5 && o.x.p.qtd >= 2);
+  promocao.slice(0, 2).forEach(o => { const espaco = Math.max(0, Math.floor(o.margem - margemMin));
+    add('op', '🏷️', 'Promoção possível: ' + o.x.p.nome,
+      'Está parado, tem estoque (' + o.x.p.qtd + ' un) e margem de ' + Fmt.pct(o.margem) + '.',
+      'Margem atual ' + Fmt.pct(o.margem) + ' · margem mínima ' + margemMin + '%',
+      'Dá para acelerar a venda sem operar no prejuízo.',
+      'Conceda até ' + espaco + '% de desconto (ainda acima da margem mínima) para girar o estoque.', espaco); });
+
+  /* ---- 9. Vale comprar de novo (giro rápido + margem acima da média) ---- */
+  const margemMedia = T.margemV;
+  const recompra = a.filter(x => x.qtd >= 2 && x.margemV >= margemMedia).map(x => {
+    const p = BI.prodInfo(x.sku); const est = p ? p.qtd : 0; return { x, est };
+  }).sort((u, v) => v.x.lucro - u.x.lucro);
+  recompra.filter(o => o.est <= (BI.prodInfo(o.x.sku) || {}).min * 2).slice(0, 2).forEach(o => add('op', '🟢', 'Comprar de novo: ' + o.x.nome,
+    'Girou rápido (' + o.x.qtd + ' un no período) com margem ' + Fmt.pct(o.x.margemV) + ', acima da média (' + Fmt.pct(margemMedia) + ').',
+    'Lucro no período ' + Fmt.brl(o.x.lucro) + ' · estoque atual ' + o.est + ' un',
+    'Produto que vende rápido e com boa margem é onde vale reinvestir.',
+    'Reabasteça ' + o.x.nome + ' — tende a vender de novo com boa margem.', o.x.lucro));
+
+  /* ---- 10. Não compensam (muito estoque, pouco lucro) ---- */
+  const naoCompensa = prods.filter(p => p.qtd > 0).map(p => {
+    const ag = aMap[p.sku] || { lucro: 0 };
+    const stockShare = (p.custoMedio || p.custo || 0) * p.qtd / estValorTot * 100;
+    const profitShare = ag.lucro / lucroTot * 100;
+    return { p, stockShare, profitShare, ag };
+  }).filter(o => o.stockShare >= 5 && o.stockShare > o.profitShare * 2).sort((u, v) => (v.stockShare - v.profitShare) - (u.stockShare - u.profitShare));
+  naoCompensa.slice(0, 2).forEach(o => add('media', '⚠️', 'Não compensa: ' + o.p.nome,
+    'Representa ' + Fmt.pct(o.stockShare) + ' do seu estoque, mas só ' + Fmt.pct(Math.max(0, o.profitShare)) + ' do lucro.',
+    o.p.qtd + ' un · ' + Fmt.brl((o.p.custoMedio || o.p.custo) * o.p.qtd) + ' imobilizados',
+    'Muito capital preso gerando pouco retorno.',
+    'Reduza a exposição: promoção, queima ou pare de repor.', o.stockShare));
+
+  /* ---- 11. Evolução da empresa ---- */
+  const vari = (cur, prev) => prev ? (cur - prev) / Math.abs(prev) * 100 : (cur ? 100 : 0);
+  if (ctx.st.periodo !== 'all' && (P.receita > 0 || P.nv > 0)) {
+    const dFat = vari(T.receita, P.receita), dLucro = vari(T.lucroLiq, P.lucroLiq), dTicket = vari(T.ticket, P.ticket);
+    if (dFat <= -10) add('alta', '📉', 'Vendas em queda',
+      'O faturamento caiu ' + Fmt.pct(Math.abs(dFat)) + ' em relação ao período anterior.',
+      'Atual ' + Fmt.brl(T.receita) + ' vs anterior ' + Fmt.brl(P.receita),
+      'Queda de receita afeta todo o resultado da loja.',
+      'Reforce divulgação, revise preços e foque nos produtos campeões.', Math.abs(dFat));
+    else if (dFat >= 10) add('op', '📈', 'Vendas em alta',
+      'O faturamento cresceu ' + Fmt.pct(dFat) + ' vs o período anterior.',
+      'Atual ' + Fmt.brl(T.receita) + ' vs anterior ' + Fmt.brl(P.receita),
+      'Momento bom para aproveitar a demanda.',
+      'Garanta estoque dos itens que estão puxando o crescimento.', dFat);
+    if (dLucro <= -10) add('alta', '💸', 'Lucro em queda',
+      'O lucro líquido caiu ' + Fmt.pct(Math.abs(dLucro)) + ' vs o período anterior.',
+      'Atual ' + Fmt.brl(T.lucroLiq) + ' vs anterior ' + Fmt.brl(P.lucroLiq),
+      'Queda de lucro pode indicar custos/taxas subindo ou descontos demais.',
+      'Verifique margens, taxas e descontos concedidos.', Math.abs(dLucro));
+    if (Math.abs(dTicket) >= 8) add(dTicket >= 0 ? 'op' : 'media', '🎟️', 'Ticket médio ' + (dTicket >= 0 ? 'subindo' : 'caindo'),
+      'O ticket médio ' + (dTicket >= 0 ? 'subiu' : 'caiu') + ' ' + Fmt.pct(Math.abs(dTicket)) + '.',
+      'Atual ' + Fmt.brl(T.ticket) + ' vs anterior ' + Fmt.brl(P.ticket),
+      'Ticket é o quanto cada cliente gasta em média.',
+      dTicket >= 0 ? 'Continue incentivando combos e vendas casadas.' : 'Estimule vendas casadas (console + acessório) para elevar o ticket.', Math.abs(dTicket));
+  }
+
+  /* ---- 12. Eficiência das formas de pagamento ---- */
+  let pay = null, refRate = 0, economia = 0;
+  if (typeof BI.payAgg === 'function') {
+    pay = BI.payAgg(vendas); refRate = BI.refCardRate ? BI.refCardRate() : 0;
+    const semTaxa = (pay.list.find(x => x.key === 'PIX') || { valor: 0 }).valor + (pay.list.find(x => x.key === 'Dinheiro') || { valor: 0 }).valor;
+    economia = semTaxa * refRate / 100;
+    const pctTaxaLucro = T.lucro ? pay.totTaxa / T.lucro * 100 : 0;
+    if (pay.totTaxa > 0) add(pctTaxaLucro > 20 ? 'media' : 'op', '💳', 'Taxas consumindo o lucro',
+      'As taxas de cartão comeram ' + Fmt.pct(pctTaxaLucro) + ' do seu lucro bruto no período.',
+      'Taxas ' + Fmt.brl(pay.totTaxa) + ' · lucro bruto ' + Fmt.brl(T.lucro),
+      'Cada real em taxa sai direto da sua margem.',
+      'Incentive PIX/dinheiro nas vendas à vista.', pctTaxaLucro);
+    if (economia > 0) add('op', '💚', 'PIX e dinheiro economizam taxa',
+      'Vendas em PIX/dinheiro evitaram cerca de ' + Fmt.brl(economia) + ' em taxas.',
+      'Base sem taxa ' + Fmt.brl(semTaxa) + ' · taxa de cartão de referência ' + Fmt.pct(refRate),
+      'É lucro que fica na loja em vez de ir para a operadora.',
+      'Ofereça um pequeno desconto no PIX — ainda sai mais barato que a taxa do cartão.', economia);
+  }
+
+  /* ---- 13. Produtos usados ---- */
+  const usados = a.filter(x => (x.condicao === 'usado')).map(x => {
+    const p = BI.prodInfo(x.sku); const roi = x.custo ? x.lucro / x.custo * 100 : 0;
+    const criado = p && p.criadoEm ? new Date(p.criadoEm).getTime() : null; const vend = ls[x.sku] ? ls[x.sku] : null;
+    const tempo = (criado && vend) ? Math.max(0, Math.round((vend - criado) / 86400000)) : null;
+    return { nome: x.nome, qtd: x.qtd, lucro: x.lucro, margem: x.margemV, roi, tempo };
+  }).sort((u, v) => v.lucro - u.lucro);
+  if (usados.length) { const u0 = usados[0];
+    add('op', '🔄', 'Usados dão bom retorno',
+      'Usados mais lucrativo: ' + u0.nome + ' (ROI ' + Fmt.pct(u0.roi) + ').',
+      usados.reduce((s, u) => s + u.qtd, 0) + ' usados vendidos · lucro ' + Fmt.brl(usados.reduce((s, u) => s + u.lucro, 0)),
+      'Usados costumam ter margem/ROI melhores que produto novo.',
+      'Aumente a captação de usados como ' + u0.nome + ' na avaliação/troca.', u0.lucro);
+  }
+
+  /* ---- 14. Pré-vendas ---- */
+  let prevRk = [], pvPend = 0, pvClientes = 0;
+  if (typeof PV !== 'undefined') {
+    const ativas = DB.all('prevendas').filter(p => !p.cancelado);
+    const vp = (PV.vendaPendentes ? PV.vendaPendentes() : []);
+    const rk = {};
+    ativas.forEach(p => { const k = p.produtoNome || '—'; rk[k] = rk[k] || { nome: k, qtd: 0, valor: 0 }; rk[k].qtd += p.qtd || 1; rk[k].valor += p.valorTotal || 0; });
+    vp.forEach(o => { const k = o.it.nome; rk[k] = rk[k] || { nome: k, qtd: 0, valor: 0 }; rk[k].qtd += o.it.qtd || 1; rk[k].valor += (o.it.preco * o.it.qtd) || 0; });
+    prevRk = Object.values(rk).sort((x, y) => y.qtd - x.qtd).slice(0, 6);
+    pvPend = ativas.filter(p => !p.entregue).reduce((s, p) => s + PV.restante(p), 0);
+    pvClientes = ativas.filter(p => !p.entregue).length + vp.length;
+    if (prevRk.length) add('op', '📋', 'Produtos mais aguardados',
+      'Mais reservado: ' + prevRk[0].nome + ' (' + prevRk[0].qtd + ' reserva(s)).',
+      pvClientes + ' cliente(s) aguardando · ' + Fmt.brl(pvPend) + ' ainda a receber',
+      'Demanda garantida antes de o produto chegar.',
+      'Priorize a chegada de ' + prevRk[0].nome + ' e avise os clientes na retirada.', prevRk[0].qtd);
+  }
+
+  /* ---- 15. Alertas inteligentes adicionais ---- */
+  if (parados90.length) add('alta', '🚨', parados90.length + ' produto(s) parado(s) há +90 dias',
+    'Há ' + parados90.length + ' produtos sem vender há mais de 90 dias.',
+    Fmt.brl(parados90.reduce((s, x) => s + x.valor, 0)) + ' imobilizados nesses itens',
+    'Estoque velho perde valor e ocupa capital.',
+    'Defina uma ação de queima para esses itens neste mês.', 999);
+  const baixoEstoque = prods.filter(p => (p.qtd || 0) - (p.reservado || 0) - (p.manutencao || 0) <= p.min && p.qtd >= 0 && Modules.disp(p) >= 0);
+  // contas
+  const cPagar = (typeof Calc !== 'undefined' && Calc.contasPagar) ? Calc.contasPagar() : 0;
+  const cReceber = (typeof Calc !== 'undefined' && Calc.contasReceber) ? Calc.contasReceber() : 0;
+
+  return { cards, topLucro, margemBaixa, parados, paradosValor, campQtd, campFat, campLucro, cross, reposicao, promocao, recompra, naoCompensa, usados, prevRk, pvPend, pvClientes, T, P, pay, refRate, economia, cPagar, cReceber, spanDays, estValorTot };
+};
+
+Modules.biInsights = function () {
+  const ctx = this.biRangeCtx();
+  if (!ctx.vendas.length && !BI.prods().length) return '<div class="empty-state"><div class="big">🧠</div>Sem dados suficientes para gerar insights. Registre vendas e produtos.</div>';
+  const D = this.insightsData(ctx);
+  const per = ctx.label;
+  const byPri = p => D.cards.filter(c => c.pri === p).sort((a, b) => b.score - a.score);
+  const alta = byPri('alta'), media = byPri('media'), op = byPri('op');
+
+  const cardHtml = c => `<div class="ins-card ${c.pri}">
+    <div class="ins-h">${c.ico} <b>${esc(c.titulo)}</b></div>
+    <div class="ins-oque">${esc(c.oque)}</div>
+    <div class="ins-meta"><span class="ins-tag">📊 Dado</span> ${esc(c.dado)}</div>
+    <div class="ins-meta"><span class="ins-tag">❓ Por quê</span> ${esc(c.porque)}</div>
+    <div class="ins-acao">✅ <b>Ação:</b> ${esc(c.acao)}</div>
+  </div>`;
+
+  // Resumo executivo
+  const exOp = op.slice(0, 5), exRisco = alta.concat(media).slice(0, 5);
+  const exLucr = D.campLucro.slice(0, 5), exPre = D.naoCompensa.concat(D.margemBaixa.map(x => ({ p: { nome: x.nome }, motivo: 'margem ' + Fmt.pct(x.margemV) }))).slice(0, 5);
+  const liItem = (t, s) => `<div class="ex-li"><div class="ex-t">${esc(t)}</div>${s ? `<div class="ex-s">${esc(s)}</div>` : ''}</div>`;
+  const exec = `<div class="grid cols-2" style="margin-bottom:16px">
+    <div class="card ex-op"><div class="section-title">🟢 5 principais oportunidades</div>${exOp.length ? exOp.map(c => liItem(c.titulo, c.acao)).join('') : '<p class="muted">Sem oportunidades destacadas no período.</p>'}</div>
+    <div class="card ex-risk"><div class="section-title">🔴 5 principais riscos</div>${exRisco.length ? exRisco.map(c => liItem(c.titulo, c.oque)).join('') : '<p class="muted">Nenhum risco relevante. 🎉</p>'}</div>
+  </div>
+  <div class="grid cols-2" style="margin-bottom:16px">
+    <div class="card"><div class="section-title">💎 5 produtos mais lucrativos</div>${exLucr.length ? exLucr.map(x => liItem(x.nome, x.qtd + ' un · lucro ' + Fmt.brl(x.lucro) + ' · margem ' + Fmt.pct(x.margemV))).join('') : '<p class="muted">Sem vendas no período.</p>'}</div>
+    <div class="card"><div class="section-title">⚠️ 5 produtos mais preocupantes</div>${exPre.length ? exPre.map(x => liItem(x.p ? x.p.nome : x.nome, x.motivo || (x.stockShare ? Fmt.pct(x.stockShare) + ' do estoque / ' + Fmt.pct(Math.max(0, x.profitShare || 0)) + ' do lucro' : ''))).join('') : '<p class="muted">Nada preocupante. 🎉</p>'}</div>
+  </div>`;
+
+  // tabelas de apoio
+  const tblLucro = D.topLucro.length ? `<div class="card" style="margin-bottom:16px"><div class="section-title">💰 Top 10 produtos por lucro líquido <span class="muted" style="font-weight:500">· ${esc(per)}</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Produto</th><th class="num">Qtd</th><th class="num">Receita</th><th class="num">Lucro</th><th class="num">Margem</th></tr></thead>
+    <tbody>${D.topLucro.map(x => `<tr><td class="strong">${esc(x.nome)}</td><td class="num">${x.qtd}</td><td class="num">${Fmt.brl(x.receita)}</td><td class="num strong" style="color:var(--green)">${Fmt.brl(x.lucro)}</td><td class="num">${Fmt.pct(x.margemV)}</td></tr>`).join('')}</tbody></table></div></div>` : '';
+
+  const tblRepo = D.reposicao.filter(x => x.diasEstoque <= 30).length ? `<div class="card" style="margin-bottom:16px"><div class="section-title">📦 Reposição — dias de estoque restantes</div>
+    <div class="table-wrap"><table><thead><tr><th>Produto</th><th class="num">Estoque</th><th class="num">Média/semana</th><th class="num">Dias restantes</th></tr></thead>
+    <tbody>${D.reposicao.filter(x => x.diasEstoque <= 30).slice(0, 10).map(x => `<tr><td class="strong">${esc(x.nome)}</td><td class="num">${x.estoque}</td><td class="num">${x.mediaSem.toFixed(1)}</td><td class="num strong" style="color:${x.diasEstoque <= 7 ? 'var(--red)' : x.diasEstoque <= 14 ? 'var(--amber)' : 'var(--txt)'}">${Math.round(x.diasEstoque)} dias</td></tr>`).join('')}</tbody></table></div></div>` : '';
+
+  const tblCross = D.cross.filter(c => c.comps.length).length ? `<div class="card" style="margin-bottom:16px"><div class="section-title">🔗 Compram juntos (venda cruzada)</div>
+    ${D.cross.filter(c => c.comps.length).slice(0, 5).map(c => `<div class="bi-row"><div class="bi-main"><div class="bi-name">${esc(c.nome)}</div><div class="bi-sub">${c.comps.slice(0, 3).map(k => esc(k.nome) + ' (' + Math.round(c.orders ? k.count / c.orders * 100 : 0) + '%)').join(' · ')}</div></div><span class="badge b-gray">${c.orders} vendas</span></div>`).join('')}</div>` : '';
+
+  const tblUsados = D.usados.length ? `<div class="card" style="margin-bottom:16px"><div class="section-title">🔄 Produtos usados — rentabilidade</div>
+    <div class="table-wrap"><table><thead><tr><th>Produto</th><th class="num">Qtd</th><th class="num">Lucro</th><th class="num">Margem</th><th class="num">ROI</th><th class="num">Tempo p/ vender</th></tr></thead>
+    <tbody>${D.usados.slice(0, 8).map(u => `<tr><td class="strong">${esc(u.nome)}</td><td class="num">${u.qtd}</td><td class="num" style="color:var(--green)">${Fmt.brl(u.lucro)}</td><td class="num">${Fmt.pct(u.margem)}</td><td class="num strong">${Fmt.pct(u.roi)}</td><td class="num">${u.tempo != null ? u.tempo + ' dias' : '—'}</td></tr>`).join('')}</tbody></table></div></div>` : '';
+
+  const tblPrev = D.prevRk.length ? `<div class="card" style="margin-bottom:16px"><div class="section-title">📋 Pré-vendas — mais aguardados</div>
+    <div class="muted" style="font-size:12px;margin-bottom:8px">${D.pvClientes} cliente(s) aguardando · ${Fmt.brl(D.pvPend)} ainda a receber</div>
+    ${biRankRows(D.prevRk, x => x.qtd, x => x.qtd + ' reserva(s)', x => Fmt.brl(x.valor))}</div>` : '';
+
+  return `
+  <div class="bi-periodhead">🧠 Insights do período: <b>${esc(per)}</b> · analisando vendas, estoque, margens, pagamentos, usados e pré-vendas com base nos dados reais.</div>
+  <div class="section-title" style="margin:0 0 10px">📌 Resumo Executivo</div>
+  ${exec}
+  <div class="section-title" style="margin:6px 0 10px">🚦 Insights por prioridade</div>
+  ${alta.length ? `<div class="ins-group-title alta">🔴 Alta prioridade (${alta.length})</div><div class="ins-grid">${alta.map(cardHtml).join('')}</div>` : ''}
+  ${media.length ? `<div class="ins-group-title media">🟡 Média prioridade (${media.length})</div><div class="ins-grid">${media.map(cardHtml).join('')}</div>` : ''}
+  ${op.length ? `<div class="ins-group-title op">🟢 Oportunidades (${op.length})</div><div class="ins-grid">${op.map(cardHtml).join('')}</div>` : ''}
+  ${(!alta.length && !media.length && !op.length) ? '<div class="card"><p class="muted">Sem insights acionáveis no período selecionado. Experimente um período maior.</p></div>' : ''}
+  <div class="section-title" style="margin:16px 0 10px">📈 Análises detalhadas</div>
+  ${tblLucro}${tblRepo}${tblCross}${tblUsados}${tblPrev}`;
 };
 
 </script>
