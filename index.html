@@ -448,6 +448,17 @@ td .muted,.muted{color:var(--txt-3)}
 .vd-result-val{font-size:26px;font-weight:800}
 @media (max-width:640px){ .vd-calc-line{grid-template-columns:1fr;gap:2px} .vd-result-val{font-size:22px} }
 
+/* ===== Barra de período dos Relatórios ===== */
+.bi-periodbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:var(--bg-2);border:1px solid var(--line);border-radius:11px;padding:10px 14px;margin:6px 0 14px}
+.bi-pb-left{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.bi-periodbar select,.bi-periodbar input{padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--txt);font-size:13px}
+.bi-pb-label{font-size:13px;color:var(--txt-2)}
+.bi-pb-label b{color:var(--txt)}
+.bi-periodhead{font-size:13.5px;color:var(--txt-2);margin-bottom:12px;padding:8px 12px;background:var(--bg-2);border-left:3px solid var(--accent,#5b8cff);border-radius:8px}
+.bi-periodhead b{color:var(--txt)}
+.kpi-sub .up{color:var(--green);font-weight:700} .kpi-sub .down{color:var(--red);font-weight:700}
+@media (max-width:640px){ .bi-periodbar{flex-direction:column;align-items:flex-start} }
+
 </style>
   <script>
     /* Aplica o tema o quanto antes para evitar "flash" ao carregar */
@@ -519,7 +530,7 @@ td .muted,.muted{color:var(--txt-3)}
       <div class="sidebar-foot">
         <div class="sync-pill"><span class="dot"></span> <span id="sync-label">Offline · salvo localmente</span></div>
         <a class="nav-item small" onclick="App.logout()"><span class="ico">⏻</span> Sair</a>
-        <div style="font-size:10.5px;color:var(--txt-3);padding:6px 4px 0;opacity:.8">versão 3.7 · persistência segura</div>
+        <div style="font-size:10.5px;color:var(--txt-3);padding:6px 4px 0;opacity:.8">versão 3.8 · período nos relatórios</div>
       </div>
     </aside>
     <div class="sidebar-overlay" id="sidebar-overlay" onclick="App.toggleSidebar(false)"></div>
@@ -4531,6 +4542,7 @@ Modules.cfgSegurancaCard = function () {
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="btn-primary" onclick="Modules.cfgBackupDownload()">⬇️ Baixar cópia de segurança (.json)</button>
       <button class="btn-ghost" onclick="Modules.cfgRestoreBackup()" ${bk.has ? '' : 'disabled title="Nenhum backup automático ainda"'}>♻️ Restaurar último backup${bk.at ? ' (' + Fmt.datetime(bk.at) + ')' : ''}</button>
+      <button class="btn-ghost" onclick="Modules.cfgDiagnostico()">🔎 Diagnóstico de dados</button>
     </div>
     <p class="muted" style="font-size:12px;margin-top:10px">Dica: baixe uma cópia periodicamente. Se algum dia notar dados sumindo, restaure o backup aqui antes de qualquer outra coisa.</p>
   </div>
@@ -4545,6 +4557,54 @@ Modules.cfgSegurancaCard = function () {
     <button class="btn-danger" style="margin-top:16px" onclick="Modules.cfgResetData()">🗑️ Resetar sistema (zerar dados)</button>
     ${logs.length ? `<div style="margin-top:18px"><div style="font-size:12.5px;font-weight:700;color:var(--txt-2);margin-bottom:8px">Histórico de resets</div>${logs.slice(0, 8).map(l => `<div class="mini-stat"><span>${Fmt.datetime(l.data)}</span><span>${esc(l.usuario)}</span></div>`).join('')}</div>` : ''}
   </div>`;
+};
+Modules.cfgDiagnostico = function () {
+  const vendas = DB.all('vendas'), ativas = vendas.filter(v => !v.cancelada);
+  const vids = new Set(vendas.map(v => v.id));
+  // Vendas por dia (últimos 14 dias) — permite ver um dia com 0 vendas que deveria ter vendas
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  const dias = [];
+  for (let i = 0; i < 14; i++) { const d = new Date(hoje); d.setDate(d.getDate() - i); dias.push(d); }
+  const byDay = {}; ativas.forEach(v => { const k = new Date(v.data).toISOString().slice(0, 10); byDay[k] = byDay[k] || { n: 0, tot: 0 }; byDay[k].n++; byDay[k].tot += v.total || 0; });
+  const linhasDia = dias.map(d => { const k = d.toISOString().slice(0, 10); const x = byDay[k] || { n: 0, tot: 0 }; return `<tr><td>${Fmt.date(d)}</td><td class="num ${x.n === 0 ? 'muted' : 'strong'}">${x.n}</td><td class="num">${Fmt.brl(x.tot)}</td></tr>`; }).join('');
+  // Órfãos: registros que apontam para uma venda que não existe mais (impressão digital de venda perdida)
+  const orfFin = DB.all('financeiro').filter(f => f.origem === 'venda' && f.refId && !vids.has(f.refId));
+  const orfMov = DB.all('movimentacoes').filter(m => m.tipo === 'venda' && m.refId && !vids.has(m.refId));
+  const orfCx = DB.all('caixa').filter(c => c.refId && /venda/i.test(c.origem || c.tipo || '') && !vids.has(c.refId));
+  const orfaos = orfFin.length + orfMov.length + orfCx.length;
+  const ultima = ativas.length ? ativas.slice().sort((a, b) => new Date(b.data) - new Date(a.data))[0] : null;
+  const sync = (typeof Cloud !== 'undefined') ? { rev: Cloud.rev ? Cloud.rev() : '?', dirty: Cloud.isDirty ? Cloud.isDirty() : false, conf: Cloud.configured ? Cloud.configured() : false } : { conf: false };
+  const bk = (DB.backupInfo && DB.backupInfo()) || { has: false };
+  Modal.open({
+    title: '🔎 Diagnóstico de dados', wide: true,
+    body: `
+      <div class="grid kpis" style="margin-bottom:14px">
+        ${kpi('Vendas', Fmt.num(ativas.length), vendas.length - ativas.length + ' cancelada(s)', '🧾', '')}
+        ${kpi('Compras', Fmt.num(DB.all('compras').length), null, '🚚', '')}
+        ${kpi('Lançamentos financeiros', Fmt.num(DB.all('financeiro').length), null, '💰', '')}
+        ${kpi('Produtos', Fmt.num(DB.all('produtos').length), null, '📦', '')}
+      </div>
+      <div class="card ${orfaos ? '' : ''}" style="margin-bottom:14px;background:var(--bg-2);${orfaos ? 'border:1px solid var(--red)' : ''}">
+        <div class="mini-stat"><span>${orfaos ? '🚨' : '✅'} Registros órfãos (vendas que sumiram mas deixaram rastro)</span><b style="color:${orfaos ? 'var(--red)' : 'var(--green)'}">${orfaos}</b></div>
+        ${orfaos ? `<div class="muted" style="font-size:12px;margin-top:6px">Encontramos ${orfMov.length} movimentação(ões), ${orfFin.length} lançamento(s) financeiro(s) e ${orfCx.length} de caixa apontando para vendas que não existem mais. Isso indica vendas perdidas. Valores rastreados:</div>
+          <div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Origem</th><th>Descrição</th><th>Data</th><th class="num">Valor</th></tr></thead><tbody>
+          ${orfMov.slice(0, 20).map(m => `<tr><td>Movimentação</td><td>${esc(m.descricao || '')}</td><td>${Fmt.date(m.data)}</td><td class="num">${Fmt.brl((m.valor != null ? m.valor : (m.o && m.o.valor) || 0))}</td></tr>`).join('')}
+          ${orfFin.slice(0, 20).map(f => `<tr><td>Financeiro</td><td>${esc(f.descricao || '')}</td><td>${Fmt.date(f.data || f.emissao)}</td><td class="num">${Fmt.brl(f.valor || 0)}</td></tr>`).join('')}
+          </tbody></table></div>` : '<div class="muted" style="font-size:12px;margin-top:6px">Nenhum rastro de venda perdida encontrado. (Obs: se a nuvem sobrescreveu tudo de uma vez, não sobra rastro interno — confira também pelos cupons impressos e pelo Supabase.)</div>'}
+      </div>
+      <div class="grid cols-2" style="margin-bottom:0">
+        <div class="card"><div class="section-title">Vendas por dia (14 dias)</div>
+          <div class="table-wrap"><table><thead><tr><th>Dia</th><th class="num">Vendas</th><th class="num">Total</th></tr></thead><tbody>${linhasDia}</tbody></table></div>
+          <div class="muted" style="font-size:12px;margin-top:6px">Última venda registrada: <b>${ultima ? Fmt.datetime(ultima.data) : '—'}</b>. Se um dia em que você vendeu aparece com <b>0</b>, houve perda naquele dia.</div></div>
+        <div class="card"><div class="section-title">Sincronização e backup</div>
+          <div class="mini-stat"><span>Nuvem configurada</span><b>${sync.conf ? 'Sim' : 'Não'}</b></div>
+          <div class="mini-stat"><span>Versão de sincronização (rev)</span><b>${sync.rev}</b></div>
+          <div class="mini-stat"><span>Alterações pendentes de envio</span><b style="color:${sync.dirty ? 'var(--amber)' : 'var(--green)'}">${sync.dirty ? 'Sim' : 'Não'}</b></div>
+          <div class="mini-stat"><span>Último backup automático</span><b>${bk.at ? Fmt.datetime(bk.at) : '—'}</b></div>
+          <div class="muted" style="font-size:12px;margin-top:8px">Para conferir a fundo: abra o Supabase → Table Editor → <b>erp_state</b> e veja a coluna <b>updated_at</b> (quando a nuvem foi gravada pela última vez).</div></div>
+      </div>`,
+    foot: `<button class="btn-ghost" onclick="Modal.close()">Fechar</button><button class="btn-primary" onclick="Modules.cfgBackupDownload()">⬇️ Baixar cópia agora</button>`
+  });
 };
 Modules.cfgBackupDownload = function () {
   try {
@@ -5280,15 +5340,18 @@ const BI = {
     }); });
     return Object.values(m).map(x => { x.margemV = x.receita ? x.lucro / x.receita * 100 : 0; x.margemC = x.custo ? x.lucro / x.custo * 100 : 0; x.lucroUn = x.qtd ? x.lucro / x.qtd : 0; x.ticket = x.orders ? x.receita / x.orders : x.receita; return x; });
   },
-  totals() {
-    const a = this.agg();
+  totals(vendasList) {
+    const vendas = vendasList || this.vendas();
+    const a = this.agg(vendas);
     const receita = a.reduce((s, x) => s + x.receita, 0), custo = a.reduce((s, x) => s + x.custo, 0);
-    const lucro = receita - custo, qtd = a.reduce((s, x) => s + x.qtd, 0), nv = this.vendas().length;
-    const taxas = (typeof Taxas !== 'undefined') ? this.vendas().reduce((s, v) => s + Taxas.feeVenda(v), 0) : 0;
+    const lucro = receita - custo, qtd = a.reduce((s, x) => s + x.qtd, 0), nv = vendas.length;
+    const taxas = (typeof Taxas !== 'undefined') ? vendas.reduce((s, v) => s + Taxas.feeVenda(v), 0) : 0;
     const estUnid = BI.prods().reduce((s, p) => s + p.qtd, 0);
     const lucroLiq = lucro - taxas;
+    const usadosVend = vendas.reduce((s, v) => s + (v.itens || []).filter(i => (i.condicao || (BI.prodInfo(i.sku) || {}).condicao) === 'usado').reduce((ss, i) => ss + i.qtd, 0), 0);
+    const recebidoFin = DB.all('financeiro').filter(f => f.financeira && f.origem === 'venda' && ((f.pago || 0) >= (f.valor || 0) - 0.01)).reduce((s, f) => s + (f.liquido != null ? f.liquido : (f.valor - (f.taxa || 0))), 0);
     return {
-      receita, custo, lucro, taxas, liquido: receita - taxas, lucroLiq, qtd, nv,
+      receita, custo, lucro, taxas, liquido: receita - taxas, lucroLiq, qtd, nv, usadosVend, recebidoFin,
       ticket: nv ? receita / nv : 0,
       margemV: receita ? lucro / receita * 100 : 0, margemC: custo ? lucro / custo * 100 : 0,
       margemLiqV: receita ? lucroLiq / receita * 100 : 0, margemLiqC: custo ? lucroLiq / custo * 100 : 0,
@@ -5322,14 +5385,29 @@ const BI = {
   },
   range(periodo, de, ate) {
     const now = new Date(), s0 = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }, e0 = d => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; };
+    const dback = n => { const s = new Date(now); s.setDate(s.getDate() - (n - 1)); return { start: s0(s), end: e0(now) }; };
     if (periodo === 'hoje') return { start: s0(now), end: e0(now) };
     if (periodo === 'ontem') { const y = new Date(now); y.setDate(y.getDate() - 1); return { start: s0(y), end: e0(y) }; }
-    if (periodo === '7d') { const s = new Date(now); s.setDate(s.getDate() - 6); return { start: s0(s), end: e0(now) }; }
-    if (periodo === '30d') { const s = new Date(now); s.setDate(s.getDate() - 29); return { start: s0(s), end: e0(now) }; }
+    if (periodo === '7d') return dback(7);
+    if (periodo === '15d') return dback(15);
+    if (periodo === '30d') return dback(30);
+    if (periodo === '3m') { const s = new Date(now); s.setMonth(s.getMonth() - 3); return { start: s0(s), end: e0(now) }; }
+    if (periodo === '6m') { const s = new Date(now); s.setMonth(s.getMonth() - 6); return { start: s0(s), end: e0(now) }; }
+    if (periodo === '12m') { const s = new Date(now); s.setMonth(s.getMonth() - 12); return { start: s0(s), end: e0(now) }; }
     if (periodo === 'mes') return { start: s0(new Date(now.getFullYear(), now.getMonth(), 1)), end: e0(now) };
+    if (periodo === 'mesAnterior') return { start: s0(new Date(now.getFullYear(), now.getMonth() - 1, 1)), end: e0(new Date(now.getFullYear(), now.getMonth(), 0)) };
     if (periodo === 'ano') return { start: s0(new Date(now.getFullYear(), 0, 1)), end: e0(now) };
+    if (periodo === 'anoAnterior') return { start: s0(new Date(now.getFullYear() - 1, 0, 1)), end: e0(new Date(now.getFullYear() - 1, 11, 31)) };
     if (periodo === 'custom') return { start: de ? s0(new Date(de + 'T12:00:00')) : new Date(0), end: ate ? e0(new Date(ate + 'T12:00:00')) : e0(now) };
     return { start: new Date(0), end: e0(now) };
+  },
+  periodoLabel(periodo, r) {
+    const nomes = { hoje: 'Hoje', ontem: 'Ontem', '7d': 'Últimos 7 dias', '15d': 'Últimos 15 dias', '30d': 'Últimos 30 dias', '3m': 'Últimos 3 meses', '6m': 'Últimos 6 meses', '12m': 'Últimos 12 meses', mes: 'Mês atual', mesAnterior: 'Mês anterior', ano: 'Ano atual', anoAnterior: 'Ano anterior', custom: 'Período personalizado', all: 'Todo o período' };
+    const nome = nomes[periodo] || periodo;
+    if (periodo === 'mes' || periodo === 'mesAnterior') { const m = r.start.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }); return m.charAt(0).toUpperCase() + m.slice(1); }
+    if (periodo === 'ano' || periodo === 'anoAnterior') return String(r.start.getFullYear());
+    const mesmoDia = Fmt.date(r.start) === Fmt.date(r.end);
+    return (mesmoDia ? Fmt.date(r.start) : Fmt.date(r.start) + ' até ' + Fmt.date(r.end)) + ' (' + nome + ')';
   },
   vendasPeriodo(periodo, de, ate) { const r = this.range(periodo, de, ate); return this.vendas().filter(v => { const d = new Date(v.data); return d >= r.start && d <= r.end; }); },
   crossFor(skus, vendasList) {
@@ -5342,17 +5420,56 @@ const BI = {
     return res;
   }
 };
-function periodOptsHtml(sel) { return [['all', 'Todo o período'], ['hoje', 'Hoje'], ['ontem', 'Ontem'], ['7d', 'Últimos 7 dias'], ['30d', 'Últimos 30 dias'], ['mes', 'Mês atual'], ['ano', 'Ano atual'], ['custom', 'Personalizado']].map(o => `<option value="${o[0]}" ${sel === o[0] ? 'selected' : ''}>${o[1]}</option>`).join(''); }
+function periodOptsHtml(sel) { return [['all', 'Todo o período'], ['hoje', 'Hoje'], ['ontem', 'Ontem'], ['7d', 'Últimos 7 dias'], ['15d', 'Últimos 15 dias'], ['30d', 'Últimos 30 dias'], ['mes', 'Mês atual'], ['mesAnterior', 'Mês anterior'], ['3m', 'Últimos 3 meses'], ['6m', 'Últimos 6 meses'], ['12m', 'Últimos 12 meses'], ['ano', 'Ano atual'], ['anoAnterior', 'Ano anterior'], ['custom', 'Período personalizado']].map(o => `<option value="${o[0]}" ${sel === o[0] ? 'selected' : ''}>${o[1]}</option>`).join(''); }
 
-Modules.biState = { tab: 'geral', trend: 'dia', sel: [] };
+Modules.biState = { tab: 'geral', trend: 'dia', sel: [], periodo: '30d', de: '', ate: '' };
 Modules.relatorios = function () {
   const tabs = [['geral', '📊 Visão geral'], ['pagamentos', '💳 Formas de pagamento'], ['prevendas', '📋 Pré-vendas'], ['cross', '🔗 Vendas cruzadas'], ['rankings', '🏆 Rankings'], ['pesquisa', '🔍 Pesquisa & comparação'], ['categorias', '🗂️ Categorias'], ['tendencias', '📈 Tendências'], ['rentab', '💎 Rentabilidade'], ['estoque', '📦 Estoque']];
+  const st = this.biState, r = BI.range(st.periodo, st.de, st.ate);
   setTimeout(() => Modules.biRender(), 20);
   return `
-  <div class="page-head"><div><h1>Business Intelligence</h1><p>Inteligência de vendas, margem e rentabilidade da Rico Games</p></div>
+  <div class="page-head"><div><h1>Relatórios</h1><p>Business Intelligence · vendas, margem e rentabilidade</p></div>
     <div class="actions"><button class="btn-ghost" onclick="Modules.biExport('xlsx')">⬇️ Excel</button><button class="btn-ghost" onclick="Modules.biExport('pdf')">🖨️ PDF</button></div></div>
+  <div class="bi-periodbar">
+    <div class="bi-pb-left">
+      <select id="bi-per" onchange="Modules.biPerChange()">${periodOptsHtml(st.periodo)}</select>
+      <span id="bi-per-custom" style="display:${st.periodo === 'custom' ? 'inline-flex' : 'none'};gap:6px;align-items:center">
+        <input type="date" id="bi-de" value="${st.de}"><span class="muted">até</span><input type="date" id="bi-ate" value="${st.ate}">
+        <button class="btn-primary btn-sm" onclick="Modules.biPerApply()">Aplicar</button>
+      </span>
+      <button class="btn-ghost btn-sm" onclick="Modules.biPerClear()">Limpar filtros</button>
+    </div>
+    <div class="bi-pb-label">📅 Período analisado: <b id="bi-per-label">${esc(BI.periodoLabel(st.periodo, r))}</b></div>
+  </div>
   <div class="tabs" id="bi-subnav">${tabs.map(t => `<div class="tab ${this.biState.tab === t[0] ? 'active' : ''}" onclick="Modules.biSetTab('${t[0]}')">${t[1]}</div>`).join('')}</div>
   <div id="bi-body"></div>`;
+};
+Modules.biPerChange = function () {
+  const p = fval('bi-per') || '30d';
+  this.biState.periodo = p;
+  const cc = document.getElementById('bi-per-custom'); if (cc) cc.style.display = p === 'custom' ? 'inline-flex' : 'none';
+  if (p !== 'custom') { this.biUpdateLabel(); this.biRender(); }
+};
+Modules.biPerApply = function () {
+  this.biState.de = fval('bi-de'); this.biState.ate = fval('bi-ate'); this.biState.periodo = 'custom';
+  this.biUpdateLabel(); this.biRender();
+};
+Modules.biPerClear = function () {
+  this.biState.periodo = '30d'; this.biState.de = ''; this.biState.ate = '';
+  const s = document.getElementById('bi-per'); if (s) s.value = '30d';
+  const cc = document.getElementById('bi-per-custom'); if (cc) cc.style.display = 'none';
+  this.biUpdateLabel(); this.biRender();
+};
+Modules.biUpdateLabel = function () {
+  const st = this.biState, r = BI.range(st.periodo, st.de, st.ate);
+  const el = document.getElementById('bi-per-label'); if (el) el.textContent = BI.periodoLabel(st.periodo, r);
+};
+Modules.biRangeCtx = function () {
+  const st = this.biState, r = BI.range(st.periodo, st.de, st.ate);
+  const vendas = BI.vendas().filter(v => { const d = new Date(v.data); return d >= r.start && d <= r.end; });
+  const pr = BI.prevRange(r, st.periodo);
+  const vprev = BI.vendas().filter(v => { const d = new Date(v.data); return d >= pr.start && d <= pr.end; });
+  return { st, r, pr, vendas, vprev, label: BI.periodoLabel(st.periodo, r) };
 };
 Modules.biInit = function () { this.biRender(); };
 Modules.biSetTab = function (t) {
@@ -5379,41 +5496,73 @@ function biRankRows(items, valFn, subFn, rightFn) {
 }
 
 /* ---- VISÃO GERAL ---- */
+/* Gráfico de evolução adaptativo: por hora (<=2 dias), por dia (<=62 dias) ou por mês */
+function biEvolChart(vendas, r) {
+  const spanDays = (r.end - r.start) / 86400000;
+  const gran = spanDays <= 2 ? 'hora' : (spanDays <= 62 ? 'dia' : 'mes');
+  const keyOf = d => { const x = new Date(d); return gran === 'hora' ? `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}-${x.getHours()}` : gran === 'dia' ? `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}` : `${x.getFullYear()}-${x.getMonth()}`; };
+  const list = [], cur = new Date(r.start);
+  if (gran === 'hora') { cur.setMinutes(0, 0, 0); while (cur <= r.end && list.length < 60) { list.push({ key: keyOf(cur), val: 0, n: 0, label: cur.getHours() + 'h', full: Fmt.date(cur) + ' ' + cur.getHours() + 'h' }); cur.setHours(cur.getHours() + 1); } }
+  else if (gran === 'dia') { cur.setHours(0, 0, 0, 0); while (cur <= r.end && list.length < 100) { list.push({ key: keyOf(cur), val: 0, n: 0, label: cur.getDate() + '/' + (cur.getMonth() + 1), full: Fmt.date(cur) }); cur.setDate(cur.getDate() + 1); } }
+  else { cur.setDate(1); cur.setHours(0, 0, 0, 0); while (cur <= r.end && list.length < 36) { const ml = cur.toLocaleDateString('pt-BR', { month: 'short' }); list.push({ key: keyOf(cur), val: 0, n: 0, label: ml.replace('.', '') + '/' + String(cur.getFullYear()).slice(2), full: ml + '/' + cur.getFullYear() }); cur.setMonth(cur.getMonth() + 1); } }
+  const map = {}; list.forEach(b => map[b.key] = b);
+  vendas.forEach(v => { const b = map[keyOf(v.data)]; if (b) { b.val += v.total || 0; b.n++; } });
+  const total = list.reduce((s, b) => s + b.val, 0);
+  if (!total) return '<div class="muted" style="text-align:center;padding:34px 0">Sem vendas no período selecionado.</div>';
+  const W = 720, H = 210, pl = 54, pr = 10, pt = 12, pb = 30;
+  const max = Math.max(1, ...list.map(b => b.val));
+  const bw = (W - pl - pr) / list.length;
+  let grid = '';
+  for (let i = 0; i <= 4; i++) { const val = max * i / 4, yy = pt + (1 - i / 4) * (H - pt - pb); grid += `<line x1="${pl}" y1="${yy}" x2="${W - pr}" y2="${yy}" stroke="var(--line,#2a2f3a)" stroke-width="1"/><text x="${pl - 6}" y="${yy + 3}" text-anchor="end" font-size="9.5" fill="var(--txt-2,#9aa3b2)">${Fmt.brl(val).replace('R$ ', '')}</text>`; }
+  const every = Math.ceil(list.length / 14);
+  const bars = list.map((b, i) => {
+    const x = pl + i * bw, h = (b.val / max) * (H - pt - pb), y = H - pb - h;
+    const lbl = (i % every === 0) ? `<text x="${x + bw / 2}" y="${H - 10}" text-anchor="middle" font-size="9.5" fill="var(--txt-2,#9aa3b2)">${b.label}</text>` : '';
+    return `<rect x="${(x + bw * 0.12).toFixed(1)}" y="${y.toFixed(1)}" width="${(bw * 0.76).toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" rx="2" fill="var(--accent,#5b8cff)"><title>${b.full}: ${Fmt.brl(b.val)} (${b.n} venda${b.n === 1 ? '' : 's'})</title></rect>${lbl}`;
+  }).join('');
+  const gtxt = gran === 'hora' ? 'por hora' : gran === 'dia' ? 'por dia' : 'por mês';
+  return `<div class="muted" style="font-size:11.5px;margin-bottom:4px">Faturamento ${gtxt}</div><svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">${grid}${bars}</svg>`;
+}
 Modules.biGeral = function () {
-  const T = BI.totals(), a = BI.agg();
+  const ctx = this.biRangeCtx();
+  const T = BI.totals(ctx.vendas), P = BI.totals(ctx.vprev);
+  const a = BI.agg(ctx.vendas);
   const topLucro = a.slice().sort((x, y) => y.lucro - x.lucro).slice(0, 5);
   const topFat = a.slice().sort((x, y) => y.receita - x.receita).slice(0, 5);
-  const rec = BI.recomenda();
+  const per = BI.periodoLabel(this.biState.periodo, ctx.r);
+  const perAnt = (this.biState.periodo === 'all') ? '' : BI.periodoLabel('custom', ctx.pr);
+  // comparação: retorna sub com variação (▲/▼ % e valor)
+  const cmp = (cur, prev, money, inverteCor) => {
+    if (this.biState.periodo === 'all') return per;
+    if (!prev) return cur ? '<span class="up">novo</span> · ' + per : per;
+    const d = (cur - prev) / Math.abs(prev) * 100, abs = cur - prev;
+    const good = inverteCor ? d < 0 : d >= 0;
+    return `<span class="${good ? 'up' : 'down'}">${d >= 0 ? '▲ +' : '▼ '}${Fmt.pct(Math.abs(d))}</span> · ant: ${money ? Fmt.brl(prev) : Fmt.num(prev)} (${abs >= 0 ? '+' : ''}${money ? Fmt.brl(abs) : Fmt.num(abs)})`;
+  };
   return `
+  <div class="bi-periodhead">📊 Indicadores do período: <b>${esc(per)}</b>${perAnt ? ` <span class="muted" style="font-weight:500">· comparando com o período anterior (${esc(perAnt)})</span>` : ''}</div>
   <div class="grid kpis" style="margin-bottom:16px">
-    ${kpi('Faturamento bruto', Fmt.brl(T.receita), null, '💵', '')}
-    ${kpi('Faturamento líquido', Fmt.brl(T.liquido), 'após taxas', '🏦', 'blue')}
-    ${kpi('Lucro bruto', Fmt.brl(T.lucro), 'Custo ' + Fmt.brl(T.custo), '📈', '')}
-    ${kpi('Lucro líquido', Fmt.brl(T.lucroLiq), 'após taxas', '💎', 'purple')}
+    ${kpi('Faturamento bruto', Fmt.brl(T.receita), cmp(T.receita, P.receita, true), '💵', '')}
+    ${kpi('Faturamento líquido', Fmt.brl(T.liquido), cmp(T.liquido, P.liquido, true), '🏦', 'blue')}
+    ${kpi('Lucro bruto', Fmt.brl(T.lucro), cmp(T.lucro, P.lucro, true), '📈', '')}
+    ${kpi('Lucro líquido', Fmt.brl(T.lucroLiq), cmp(T.lucroLiq, P.lucroLiq, true), '💎', 'purple')}
   </div>
   <div class="grid kpis" style="margin-bottom:16px">
-    ${kpi('Total em taxas', Fmt.brl(T.taxas), Fmt.pct(T.pctTaxas) + ' do faturamento', '💳', 'red')}
+    ${kpi('Total em taxas', Fmt.brl(T.taxas), Fmt.pct(T.pctTaxas) + ' do fat. · ' + cmp(T.taxas, P.taxas, true, true), '💳', 'red')}
     <div class="card kpi"><div class="kpi-ico">📐</div><div class="kpi-label">Margem sobre venda</div><div class="kpi-value">${Fmt.pct(T.margemV)}</div><div class="kpi-sub">líquida: ${Fmt.pct(T.margemLiqV)}</div></div>
     <div class="card kpi blue"><div class="kpi-ico">📐</div><div class="kpi-label">Margem sobre custo</div><div class="kpi-value">${Fmt.pct(T.margemC)}</div><div class="kpi-sub">líquida: ${Fmt.pct(T.margemLiqC)}</div></div>
-    ${kpi('Ticket médio', Fmt.brl(T.ticket), null, '🎟️', '')}
+    ${kpi('Ticket médio', Fmt.brl(T.ticket), cmp(T.ticket, P.ticket, true), '🎟️', '')}
   </div>
   <div class="grid kpis" style="margin-bottom:20px">
-    ${kpi('Produtos vendidos', Fmt.num(T.qtd), 'unidades', '📦', 'blue')}
-    ${kpi('Vendas realizadas', Fmt.num(T.nv), null, '🧾', 'amber')}
-    ${kpi('Giro de estoque', T.giro.toFixed(2) + 'x', T.estUnid + ' un · ' + Fmt.brl(T.estValor), '🔄', '')}
-    ${kpi('Custo dos produtos', Fmt.brl(T.custo), null, '🏷️', '')}
+    ${kpi('Vendas realizadas', Fmt.num(T.nv), cmp(T.nv, P.nv, false), '🧾', 'amber')}
+    ${kpi('Produtos vendidos', Fmt.num(T.qtd), cmp(T.qtd, P.qtd, false) + ' un', '📦', 'blue')}
+    ${kpi('Usados vendidos', Fmt.num(T.usadosVend), cmp(T.usadosVend, P.usadosVend, false) + ' un', '🔄', '')}
+    ${kpi('Custo dos produtos', Fmt.brl(T.custo), 'no período', '🏷️', '')}
   </div>
+  <div class="card" style="margin-bottom:16px"><div class="section-title">📈 Evolução no período <span class="muted" style="font-weight:500">· ${esc(per)}</span></div>${biEvolChart(ctx.vendas, ctx.r)}</div>
   <div class="grid cols-2" style="margin-bottom:16px">
-    <div class="card"><div class="section-title">💎 Top 5 em lucro</div>${biRankRows(topLucro, x => x.lucro, x => x.qtd + ' un · ' + Fmt.pct(x.margemV) + ' margem', x => Fmt.brl(x.lucro))}</div>
-    <div class="card"><div class="section-title">💵 Top 5 em faturamento</div>${biRankRows(topFat, x => x.receita, x => x.qtd + ' un · ' + Fmt.pct(x.receita / T.receita * 100) + ' do total', x => Fmt.brl(x.receita))}</div>
-  </div>
-  <div class="grid cols-2">
-    <div class="card"><div class="section-title">🟢 Comprar mais</div>
-      ${rec.buy.length ? rec.buy.map(x => `<div class="bi-row"><div class="bi-main"><div class="bi-name">${esc(x.nome)}</div><div class="bi-sub">${esc(x.motivo)}</div></div><span class="rec-tag rec-buy">Comprar</span></div>`).join('') : '<p class="muted">Sem recomendações de compra no momento.</p>'}
-    </div>
-    <div class="card"><div class="section-title">🔴 Reduzir / parar de comprar</div>
-      ${rec.stop.length ? rec.stop.map(x => `<div class="bi-row"><div class="bi-main"><div class="bi-name">${esc(x.nome)}</div><div class="bi-sub">${esc(x.motivo)}</div></div><span class="rec-tag rec-stop">Parar</span></div>`).join('') : '<p class="muted">Nenhum produto problemático. 🎉</p>'}
-    </div>
+    <div class="card"><div class="section-title">💎 Top 5 em lucro <span class="muted" style="font-weight:500">· ${esc(per)}</span></div>${topLucro.length ? biRankRows(topLucro, x => x.lucro, x => x.qtd + ' un · ' + Fmt.pct(x.margemV) + ' margem', x => Fmt.brl(x.lucro)) : '<p class="muted">Sem vendas no período.</p>'}</div>
+    <div class="card"><div class="section-title">💵 Top 5 em faturamento <span class="muted" style="font-weight:500">· ${esc(per)}</span></div>${topFat.length ? biRankRows(topFat, x => x.receita, x => x.qtd + ' un · ' + Fmt.pct(T.receita ? x.receita / T.receita * 100 : 0) + ' do total', x => Fmt.brl(x.receita)) : '<p class="muted">Sem vendas no período.</p>'}</div>
   </div>`;
 };
 
@@ -5651,10 +5800,12 @@ Modules.biEstoque = function () {
 
 /* ---- EXPORT ---- */
 Modules.biExport = function (fmt) {
-  const T = BI.totals(), a = BI.agg().slice().sort((x, y) => y.lucro - x.lucro), r2 = x => Math.round(x * 100) / 100;
+  const ctx = this.biRangeCtx();
+  const T = BI.totals(ctx.vendas), a = BI.agg(ctx.vendas).slice().sort((x, y) => y.lucro - x.lucro), r2 = x => Math.round(x * 100) / 100;
+  const _perLabel = ctx.label;
   if (fmt === 'xlsx') {
     const aoa = [
-      ['Rico Games — Relatório de Business Intelligence'], ['Gerado em', Fmt.date(new Date())], [],
+      ['Rico Games — Relatório de Business Intelligence'], ['Período analisado', _perLabel], ['Gerado em', Fmt.date(new Date())], [],
       ['INDICADORES'], ['Faturamento bruto', r2(T.receita)], ['Taxas de pagamento', r2(T.taxas)], ['Faturamento líquido', r2(T.liquido)], ['Custo dos produtos', r2(T.custo)], ['Lucro bruto', r2(T.lucro)], ['Lucro líquido', r2(T.lucroLiq)],
       ['Margem bruta s/ venda (%)', r2(T.margemV)], ['Margem líquida s/ venda (%)', r2(T.margemLiqV)], ['Margem bruta s/ custo (%)', r2(T.margemC)], ['Margem líquida s/ custo (%)', r2(T.margemLiqC)], ['% taxas sobre faturamento', r2(T.pctTaxas)], ['Ticket médio', r2(T.ticket)], ['Produtos vendidos', T.qtd], ['Vendas', T.nv], ['Giro de estoque', r2(T.giro)], [],
       ['PRODUTOS', 'Categoria', 'Condição', 'Qtd', 'Receita', 'Custo', 'Lucro', 'Margem venda %', 'Margem custo %']
@@ -5665,7 +5816,7 @@ Modules.biExport = function (fmt) {
     const kp = (l, v) => `<div class="k"><div class="l">${l}</div><div class="v">${v}</div></div>`;
     const kpis = `<div class="kpis">${kp('Faturamento', Fmt.brl(T.receita))}${kp('Lucro bruto', Fmt.brl(T.lucro))}${kp('Lucro líquido', Fmt.brl(T.lucroLiq))}${kp('Margem venda', Fmt.pct(T.margemV))}${kp('Margem custo', Fmt.pct(T.margemC))}${kp('Ticket médio', Fmt.brl(T.ticket))}${kp('Giro', T.giro.toFixed(2) + 'x')}</div>`;
     const rows = a.slice(0, 30).map(x => `<tr><td>${esc(x.nome)}</td><td>${esc(x.categoria)}</td><td class="num">${x.qtd}</td><td class="num">${Fmt.brl(x.receita)}</td><td class="num">${Fmt.brl(x.lucro)}</td><td class="num">${Fmt.pct(x.margemV)}</td></tr>`).join('');
-    Exporter.pdf('Business Intelligence', kpis + `<table><thead><tr><th>Produto</th><th>Categoria</th><th class="num">Qtd</th><th class="num">Receita</th><th class="num">Lucro</th><th class="num">Margem</th></tr></thead><tbody>${rows}</tbody></table>`);
+    Exporter.pdf('Business Intelligence · ' + _perLabel, kpis + `<table><thead><tr><th>Produto</th><th>Categoria</th><th class="num">Qtd</th><th class="num">Receita</th><th class="num">Lucro</th><th class="num">Margem</th></tr></thead><tbody>${rows}</tbody></table>`);
   }
 };
 
